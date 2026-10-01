@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release (Win10+)
+        run: msbuild montabc.sln -m -p:Configuration=Release -p:Platform=x64
+
+      - name: Build ReleaseWin7
+        run: msbuild montabc.sln -m -p:Configuration=ReleaseWin7 -p:Platform=x64
+
+      - name: Stage artifacts
+        shell: cmd
+        run: |
+          copy /y x64\Release\montabc.exe montabc-x64.exe
+          copy /y x64\ReleaseWin7\montabc.exe montabc-win7-x64.exe
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            montabc-x64.exe
+            montabc-win7-x64.exe
+          generate_release_notes: true

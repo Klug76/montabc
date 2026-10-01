@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseWin7|x64">
+      <Configuration>ReleaseWin7</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{B5E4C7A2-9F3D-4E18-A6B0-7C1D2E9F8A43}</ProjectGuid>
+    <RootNamespace>montabc</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props"/>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='Debug'">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+    <!-- манифест уже встроен в app.rc -->
+    <GenerateManifest>false</GenerateManifest>
+    <Platform>x64</Platform>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='Release'">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <!-- манифест уже встроен в app.rc -->
+    <GenerateManifest>false</GenerateManifest>
+    <Platform>x64</Platform>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)'=='ReleaseWin7'">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <!-- манифест уже встроен в app.rc -->
+    <GenerateManifest>false</GenerateManifest>
+    <Platform>x64</Platform>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props"/>
+  <ImportGroup Label="ExtensionSettings"/>
+  <PropertyGroup Label="UserMacros"/>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ConformanceMode>true</ConformanceMode>
+      <SDLCheck>false</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <!-- исходники UTF-8 без BOM; без ключа cl читает их в ACP и портит кириллицу литералов -->
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateManifest>false</GenerateManifest>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;shell32.lib;dwmapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release' or '$(Configuration)'=='ReleaseWin7'">
+    <ClCompile>
+      <Optimization>MinSpace</Optimization>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <StringPooling>true</StringPooling>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ExceptionHandling>false</ExceptionHandling>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <OmitDefaultLibraryNames>true</OmitDefaultLibraryNames>
+      <DebugInformationFormat>None</DebugInformationFormat>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;MONTABC_TINY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/Gs999999 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <EntryPointSymbol>WinMain</EntryPointSymbol>
+      <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <AdditionalOptions>/MERGE:.rdata=.text %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='ReleaseWin7'">
+    <ClCompile>
+      <PreprocessorDefinitions>MONTABC_WIN7;WINVER=0x0601;_WIN32_WINNT=0x0601;NTDDI_VERSION=0x06010000;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <Version>6.01</Version>
+      <MinimumRequiredVersion>6.01</MinimumRequiredVersion>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\main.c"/>
+    <ClCompile Include="src\util.c"/>
+    <!-- определения memset/memcpy (library helpers) несовместимы с /GL в других .obj (C2268) -->
+    <ClCompile Include="src\zerocrt.c">
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
+    <ClCompile Include="src\strings.c"/>
+    <ClCompile Include="src\config.c"/>
+    <ClCompile Include="src\monitors.c"/>
+    <ClCompile Include="src\appbar.c"/>
+    <ClCompile Include="src\panel.c"/>
+    <ClCompile Include="src\tracker.c"/>
+    <ClCompile Include="src\icons.c"/>
+    <ClCompile Include="src\layout.c"/>
+    <ClCompile Include="src\render.c"/>
+    <ClCompile Include="src\thumbs.c"/>
+    <ClCompile Include="src\switch.c"/>
+    <ClCompile Include="src\scrollbar.c"/>
+    <ClCompile Include="src\tray.c"/>
+    <ClCompile Include="src\autostart.c"/>
+    <ClCompile Include="src\win7shim.c"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\montabc.h"/>
+    <ClInclude Include="src\app.h"/>
+    <ClInclude Include="src\util.h"/>
+    <ClInclude Include="src\strings.h"/>
+    <ClInclude Include="src\config.h"/>
+    <ClInclude Include="src\monitors.h"/>
+    <ClInclude Include="src\appbar.h"/>
+    <ClInclude Include="src\panel.h"/>
+    <ClInclude Include="src\tracker.h"/>
+    <ClInclude Include="src\icons.h"/>
+    <ClInclude Include="src\layout.h"/>
+    <ClInclude Include="src\render.h"/>
+    <ClInclude Include="src\thumbs.h"/>
+    <ClInclude Include="src\switch.h"/>
+    <ClInclude Include="src\scrollbar.h"/>
+    <ClInclude Include="src\tray.h"/>
+    <ClInclude Include="src\autostart.h"/>
+    <ClInclude Include="src\win7shim.h"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="res\app.rc"/>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+  <ImportGroup Label="ExtensionTargets"/>
+</Project>

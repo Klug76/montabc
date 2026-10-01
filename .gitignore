@@ -1,0 +1,28 @@
+# MSBuild / Visual Studio output
+x64/
+.vs/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.iobj
+*.ipdb
+*.res
+*.tlog
+*.recipe
+*.lastbuildstate
+*.log
+*.aps
+*.user
+
+# tests artifacts
+tests/dump.txt
+
+# Local development / service files (not part of the project)
+AGENTS.md
+memo.md
+problems.md
+comparison.md
+.zcode/
+faxenoff/
+.svn/
