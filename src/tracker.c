@@ -108,12 +108,24 @@ static BOOL IsNotification(HWND hwnd, LONG_PTR exStyle)
 /* Классический alt-tab-фильтр + отсев cloaked-окон (UWP, виртуальные столы). */
 static BOOL IsAppWindow(HWND hwnd)
 {
+    wchar_t cls[64];
     LONG_PTR exStyle, walk, probe;
     int cloaked = 0;
 
     if (!IsWindowVisible(hwnd))
         return FALSE;
     if (GetWindowTextLengthW(hwnd) == 0)
+        return FALSE;
+
+    /* Кнопку убрали через ITaskbarList::DeleteTab — свойство ставит сама оболочка
+       (проверено tests\deltab). */
+    if (GetPropW(hwnd, L"ITaskList_Deleted"))
+        return FALSE;
+
+    /* «Голый» CoreWindow — shell-инфраструктура (Пуск, поиск): в ленту попадает
+       по UNCLOAKED в момент открытия меню. UWP-приложения представлены хостом
+       ApplicationFrameWindow, поэтому класс безопасно отсекать целиком. */
+    if (GetClassNameW(hwnd, cls, 64) && !lstrcmpW(cls, L"Windows.UI.Core.CoreWindow"))
         return FALSE;
 
     exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);

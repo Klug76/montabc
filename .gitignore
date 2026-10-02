@@ -16,7 +16,7 @@ x64/
 *.user
 
 # tests artifacts
-tests/dump.txt
+tests/*.txt
 
 # Local development / service files (not part of the project)
 AGENTS.md
