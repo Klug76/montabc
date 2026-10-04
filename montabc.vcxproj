@@ -70,6 +70,10 @@
       <GenerateManifest>false</GenerateManifest>
       <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;shell32.lib;dwmapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <!-- version.h общий для app.rc и C-кода -->
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>

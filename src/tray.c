@@ -3,6 +3,7 @@
 #include "autostart.h"
 #include "config.h"
 #include "strings.h"
+#include "version.h"
 
 #define TRAY_CLASS L"montabc.tray"
 #define TRAY_CALLBACK (WM_APP + 1)
@@ -120,7 +121,8 @@ static void Add(void)
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = TRAY_CALLBACK;
     nid.hIcon = T.showingHidden ? T.iconHidden : T.icon;
-    tip = STR_S(L"montabc — панель окон", L"montabc — window panel");
+    tip = STR_S(L"montabc " APP_VERSION_W L" — панель окон",
+                L"montabc " APP_VERSION_W L" — window panel");
     lstrcpynW(nid.szTip, tip, 128);
     Shell_NotifyIconW(NIM_ADD, &nid);
 }
@@ -154,7 +156,8 @@ void Tray_SyncIcon(void)
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = TRAY_CALLBACK;
     nid.hIcon = T.showingHidden ? T.iconHidden : T.icon;
-    tip = STR_S(L"montabc — панель окон", L"montabc — window panel");
+    tip = STR_S(L"montabc " APP_VERSION_W L" — панель окон",
+                L"montabc " APP_VERSION_W L" — window panel");
     lstrcpynW(nid.szTip, tip, 128);
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
