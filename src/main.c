@@ -255,6 +255,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int nShow)
     WNDCLASSEXW wc;
     MSG msg;
 
+    /* EntryPoint=WinMain без CRT: на x64 загрузчик кладёт в RCX параметр
+       потока, а не hInstance — модуль берём сами. */
+    hInst = GetModuleHandleW(NULL);
+
     (void)hPrev;
     (void)cmdLine;
     (void)nShow;
