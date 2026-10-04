@@ -105,7 +105,71 @@ static BOOL IsNotification(HWND hwnd, LONG_PTR exStyle)
     return IsSmallerThanHalfMonitor(hwnd);
 }
 
-/* Классический alt-tab-фильтр + отсев cloaked-окон (UWP, виртуальные столы). */
+/* Активный фильтр — живой предикат Win11 22621.6199, ReconAddsToTray2 из
+   tests\hooklist.c (см. experimental\riddle-solved.md): классика отправителя
+   shell hook + RecoverWindowsProc + band-таблица XAML-таскбара; APPWINDOW
+   перекрывает TOOLWINDOW/NOACTIVATE и owner. Поверх — локальные отсечения
+   P7 (ITaskList_Deleted, CoreWindow) и cloaked: лента показывает текущий
+   виртуальный стол. */
+static BOOL ReconAddsToTray2(HWND hwnd)
+{
+    wchar_t cls[64];
+    LONG_PTR ex;
+    DWORD band;
+    BOOL haveCls;
+    int cloaked = 0;
+
+    if (!IsWindowVisible(hwnd))
+        return FALSE;
+
+    /* Только top-level: winevent шлёт SHOW/NAME и по child-окнам, а предикаты
+       Win11 (shell hook/EnumWindows) их в принципе не видят. */
+    if (GetAncestor(hwnd, GA_PARENT) != GetDesktopWindow())
+        return FALSE;
+    if (GetWindowTextLengthW(hwnd) == 0)
+        return FALSE;
+
+    /* Кнопку убрали через ITaskbarList::DeleteTab — свойство ставит сама оболочка
+       (проверено tests\deltab). */
+    if (GetPropW(hwnd, L"ITaskList_Deleted"))
+        return FALSE;
+
+    haveCls = GetClassNameW(hwnd, cls, 64) != 0;
+    /* «Голый» CoreWindow — shell-инфраструктура (Пуск, поиск, TextInputHost):
+       живой путь Win11 режет его вне предиката — слепая зона v2. */
+    if (haveCls && !lstrcmpW(cls, L"Windows.UI.Core.CoreWindow"))
+        return FALSE;
+    /* Ghost-дубль зависшего окна — режет IsGhostWindowClass в WCREATED-ветке
+       Taskbar.dll (0x13C470). */
+    if (haveCls && !lstrcmpW(cls, L"Ghost"))
+        return FALSE;
+
+    ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    /* Отправитель hook: TOOLWINDOW и NOACTIVATE режут, APPWINDOW перекрывает оба. */
+    if (!(ex & WS_EX_APPWINDOW) && (ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)))
+        return FALSE;
+    /* IsOwnedWindow/отправитель: owned без APPWINDOW не анонсируется. */
+    if (!(ex & WS_EX_APPWINDOW) && GetWindow(hwnd, GW_OWNER))
+        return FALSE;
+
+    /* IsWindowNotDesktopOrTray */
+    if (hwnd == GetShellWindow())
+        return FALSE;
+    if (haveCls && (!lstrcmpW(cls, L"Progman") || !lstrcmpW(cls, L"WorkerW") ||
+                    !lstrcmpW(cls, L"Shell_TrayWnd")))
+        return FALSE;
+
+    /* IsValidDesktopZOrderBand; шим при отсутствии API даёт ZBID_DESKTOP. */
+    GetWindowBand(hwnd, &band);
+    if (band != ZBID_DESKTOP && band != ZBID_UIACCESS)
+        return FALSE;
+
+    DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+    return cloaked == 0;
+}
+
+/* Прежний фильтр (классический alt-tab + отсев cloaked-окон): заменён
+   ReconAddsToTray2, не вызывается — оставлен для сравнения и отката. */
 static BOOL IsAppWindow(HWND hwnd)
 {
     wchar_t cls[64];
@@ -233,7 +297,7 @@ static void TryAdd(HWND hwnd)
 {
     WindowItem item;
 
-    if (Find(hwnd) || !IsAppWindow(hwnd))
+    if (Find(hwnd) || !ReconAddsToTray2(hwnd))
         return;
 
     CreateItem(hwnd, &item);
@@ -340,7 +404,7 @@ static void CALLBACK WinEventProc(
 static BOOL CALLBACK EnumProc(HWND hwnd, LPARAM lp)
 {
     (void)lp;
-    if (IsAppWindow(hwnd))
+    if (ReconAddsToTray2(hwnd))
         AddItem(hwnd);
     return TRUE;
 }

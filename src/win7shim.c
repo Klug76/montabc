@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "win7shim.h"
 
 #ifdef MONTABC_WIN7
 
@@ -28,3 +29,24 @@ UINT Shim_GetWindowDpi(HWND hwnd)
 }
 
 #endif
+
+typedef HRESULT (WINAPI *PFN_GetWindowBand)(HWND, DWORD *);
+
+HRESULT Shim_GetWindowBand(HWND hwnd, DWORD *band)
+{
+    static PFN_GetWindowBand pfn;
+    static BOOL init;
+
+    if (!init)
+    {
+        init = TRUE;
+        pfn = (PFN_GetWindowBand)(void *)GetProcAddress(
+            GetModuleHandleW(L"user32.dll"), "GetWindowBand");
+    }
+    /* API нет (Win7/8) или вызов не удался: окно считается desktop-полосой —
+       не теряем его (семантика BandAllowed из tests/hooklist.c). */
+    if (pfn && SUCCEEDED(pfn(hwnd, band)))
+        return S_OK;
+    *band = ZBID_DESKTOP;
+    return S_OK;
+}
