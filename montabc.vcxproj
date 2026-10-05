@@ -113,7 +113,7 @@
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <!-- .pdata в .text — минус секция; остальное убирает служебные записи линкера (debug directory, Rich) -->
-      <AdditionalOptions>/MERGE:.rdata=.text /MERGE:.pdata=.text /NOCOFFGRPINFO /EMITPOGOPHASEINFO /EMITTOOLVERSIONINFO:NO %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/MERGE:.rdata=.text /MERGE:.pdata=.text /NOCOFFGRPINFO /EMITTOOLVERSIONINFO:NO %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='ReleaseWin7'">
