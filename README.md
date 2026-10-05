@@ -13,7 +13,7 @@ terms of resources.
 
 The port keeps the original's behavior and feature set but drops .NET
 entirely: pure C17 over raw WinAPI, and the Release build is a zero-CRT
-**~63 KB** exe importing only six system DLLs (no runtime, no dependencies).
+**~39 KB** exe importing only six system DLLs (no runtime, no dependencies).
 
 ## Features
 
@@ -38,7 +38,7 @@ full controls table and the note about frozen Chromium browser previews.
 
 A brief summary; the original is C#/.NET 11 (NativeAOT):
 
-- **Zero-CRT build**: single ~63 KB exe vs ~2.1 MB; imports only 6 system DLLs
+- **Zero-CRT build**: single ~39 KB exe vs ~2.1 MB; imports only 6 system DLLs
   and needs no .NET.
 - **Flicker-free resize**: full AppBar negotiation (`ABM_QUERYPOS`/`SETPOS`)
   runs once on mouse release; during the drag only a light `SetWindowPos` with
@@ -78,6 +78,13 @@ msbuild montabc.sln -m -p:Configuration=Release -p:Platform=x64
 Output: `x64\Release\montabc.exe`. The `Debug` configuration builds a normal
 CRT binary for debugging; `ReleaseWin7` produces the Windows 7-compatible
 build in `x64\ReleaseWin7\`.
+
+With the "C++ Clang tools for Windows" components installed, the same project
+builds with clang-cl, which makes the exe a few KB smaller (~36 KB):
+
+```sh
+msbuild montabc.sln -m -p:Configuration=Release -p:Platform=x64 -p:PlatformToolset=ClangCL
+```
 
 ## License
 
