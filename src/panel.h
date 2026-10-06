@@ -16,6 +16,12 @@ void Panel_SetDisplay(Panel *p, const DisplayInfo *display);
 /* Имя устройства монитора панели (ключ настроек, \\.\DISPLAY1). */
 const WCHAR *Panel_GetDevice(const Panel *p);
 
+/* Рабочая область монитора залезла под панель — shell потерял полосу. */
+BOOL Panel_IsWorkAreaBroken(const Panel *p);
+
+/* Перерегистрация appbar'а с нуля: после сна/гибернации, рестарта explorer. */
+void Panel_Reregister(Panel *p);
+
 /* Пересогласовать полосу appbar'а и поставить окно. */
 void Panel_UpdatePosition(Panel *p);
 

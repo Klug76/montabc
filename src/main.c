@@ -11,6 +11,12 @@
 #define HOST_CLASS L"montabc.host"
 #define SINGLE_INSTANCE_MUTEX L"Local\\montabc.single-instance"
 
+/* Самолечение appbar'ов: shell после сна/гибернации может сбросить
+   рабочую область; проверка откладывается — ему нужно время устаканиться. */
+#define HEAL_TIMER_ID 1
+#define HEAL_DELAY_MS 1500
+#define HEAL_MAX_ATTEMPTS 3
+
 typedef struct
 {
     WCHAR device[CCHDEVICENAME];
@@ -21,6 +27,8 @@ static struct
 {
     HINSTANCE hInst;
     HWND hwndHost;
+    UINT taskbarCreated;
+    int healAttempts;
     DisplayInfo displays[APP_MAX_MONITORS];
     int displayCount;
     PanelSlot panels[APP_MAX_MONITORS];
@@ -228,14 +236,83 @@ const DisplayInfo *App_Display(int index)
     return &S.displays[index];
 }
 
+void App_ReregisterAppBars(void)
+{
+    int i;
+    for (i = 0; i < S.panelCount; i++)
+        Panel_Reregister(S.panels[i].panel);
+}
+
+/* Починка панелей, под которые залезла рабочая область. */
+BOOL App_HealAppBars(void)
+{
+    BOOL healed = FALSE;
+    int i;
+    for (i = 0; i < S.panelCount; i++)
+        if (Panel_IsWorkAreaBroken(S.panels[i].panel))
+        {
+            Panel_Reregister(S.panels[i].panel);
+            healed = TRUE;
+        }
+    return healed;
+}
+
+static void Host_ScheduleHeal(BOOL resetAttempts)
+{
+    if (resetAttempts)
+        S.healAttempts = 0;
+    SetTimer(S.hwndHost, HEAL_TIMER_ID, HEAL_DELAY_MS, NULL);
+}
+
 static LRESULT CALLBACK Host_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if (msg == S.taskbarCreated && S.taskbarCreated)
+    {
+        /* Explorer перезапустился и забыл все appbar'ы — регистрируемся заново. */
+        App_ReregisterAppBars();
+        return 0;
+    }
+
     switch (msg)
     {
     case WM_DISPLAYCHANGE:
         App_RefreshDisplays();
         Trk_RefreshMonitors();
+        Host_ScheduleHeal(TRUE);
         return 0;
+
+    case WM_POWERBROADCAST:
+        /* Выход из сна/гибернации: shell может сбросить work area. */
+        if (wp == PBT_APMRESUMESUSPEND || wp == PBT_APMRESUMEAUTOMATIC)
+        {
+            Host_ScheduleHeal(TRUE);
+            return TRUE;
+        }
+        break;
+
+    case WM_SETTINGCHANGE:
+        /* Чужой сброс рабочей области. Свой ABM_SETPOS тоже рассылает
+           SPI_SETWORKAREA — счётчик не сбрасываем, проверка пассивна. */
+        if (wp == SPI_SETWORKAREA)
+        {
+            Host_ScheduleHeal(FALSE);
+            return 0;
+        }
+        break;
+
+    case WM_TIMER:
+        if (wp == HEAL_TIMER_ID)
+        {
+            KillTimer(hwnd, HEAL_TIMER_ID);
+            /* Своя перерегистрация меняет work area и снова приходит сюда;
+               лимит — на случай, если shell полосу так и не отдаёт. */
+            if (S.healAttempts < HEAL_MAX_ATTEMPTS && App_HealAppBars())
+                S.healAttempts++;
+            else if (S.healAttempts < HEAL_MAX_ATTEMPTS)
+                S.healAttempts = 0;
+            return 0;
+        }
+        break;
 
     case WM_ENDSESSION:
         if (wp)
@@ -287,6 +364,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int nShow)
 
     S.hwndHost = CreateWindowExW(WS_EX_TOOLWINDOW, HOST_CLASS, APP_NAME, WS_POPUP,
                                  0, 0, 0, 0, NULL, NULL, hInst, NULL);
+    S.taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     Trk_OnChanged = App_OnTrackerChanged;
     Trk_OnForeground = App_OnForeground;

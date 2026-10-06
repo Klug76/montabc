@@ -756,6 +756,34 @@ const WCHAR *Panel_GetDevice(const Panel *p)
     return p->display.device;
 }
 
+/* Рабочая область залезла под панель: shell потерял нашу полосу
+   (выход из сна/гибернации, сброс work area). При тяге и
+   пересогласовании позиции перекрытие штатно. */
+BOOL Panel_IsWorkAreaBroken(const Panel *p)
+{
+    MONITORINFO mi;
+    RECT wnd;
+
+    if (!p->hwnd || p->resizing || p->updatingPos)
+        return FALSE;
+    if (!GetWindowRect(p->hwnd, &wnd))
+        return FALSE;
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(p->display.hMon, &mi))
+        return FALSE;
+    /* Панели докованы по X во всю высоту — значимо пересечение по X. */
+    return min(wnd.right, mi.rcWork.right) > max(wnd.left, mi.rcWork.left);
+}
+
+/* Регистрация appbar'а с нуля: после сна и рестарта explorer.
+   AppBar_Register но-опит по флагу registered, поэтому сначала ABM_REMOVE. */
+void Panel_Reregister(Panel *p)
+{
+    AppBar_Unregister(&p->appbar);
+    AppBar_Register(&p->appbar);
+    Panel_UpdatePosition(p);
+}
+
 void Panel_UpdatePosition(Panel *p)
 {
     RECT rc;

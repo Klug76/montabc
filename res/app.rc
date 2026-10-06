@@ -18,9 +18,9 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", "montabc - window panel"
-            VALUE "FileVersion",     "1.1.0.0"
+            VALUE "FileVersion",     "1.2.0.0"
             VALUE "ProductName",     "montabc"
-            VALUE "ProductVersion",  "1.1.0.0"
+            VALUE "ProductVersion",  "1.2.0.0"
         END
     END
     BLOCK "VarFileInfo"

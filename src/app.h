@@ -18,6 +18,11 @@ void App_MovePanel(Panel *panel, HMONITOR target, int cursorX);
 /* Пересборка панелей под текущие мониторы и настройки (идемпотентна). */
 void App_RefreshDisplays(void);
 
+/* Восстановление полос appbar'ов, потерянных shell'ом: после сна/гибернации
+   и рестарта explorer (события ловит Host_WndProc в main.c). */
+void App_ReregisterAppBars(void);
+BOOL App_HealAppBars(void);
+
 /* «Скрыть/вернуть всё» из трея; состояние панелей сохраняется. */
 void App_ToggleHidden(void);
 BOOL App_IsHidden(void);
