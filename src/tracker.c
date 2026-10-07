@@ -1,10 +1,12 @@
 #include "tracker.h"
 #include "icons.h"
+#include "debug.h"
 #include "util.h"
 #include <dwmapi.h>
 
-static WindowItem s_items[TRK_MAX_ITEMS];
+static WindowItem *s_items;
 static int s_count;
+static int s_cap;
 static HWINEVENTHOOK s_hooks[6];
 static int s_hookCount;
 static WCHAR s_titleBuf[TRK_TITLE_MAX];
@@ -13,10 +15,15 @@ HWND g_foreground;
 void (*Trk_OnChanged)(void);
 void (*Trk_OnForeground)(HWND hwnd);
 
-static void Changed(void)
+void Trk_NotifyChanged(void)
 {
     if (Trk_OnChanged)
         Trk_OnChanged();
+}
+
+static void Changed(void)
+{
+    Trk_NotifyChanged();
 }
 
 static WindowItem *Find(HWND hwnd)
@@ -28,7 +35,7 @@ static WindowItem *Find(HWND hwnd)
     return NULL;
 }
 
-/* Индекс первой полоски — граница секций «живые/свёрнутые». */
+/* Index of the first strip — boundary between the "live/minimized" sections. */
 static int StripBoundary(void)
 {
     int i;
@@ -41,6 +48,12 @@ static int StripBoundary(void)
 static void InsertAt(int idx, const WindowItem *item)
 {
     int i;
+    if (!Util_Grow((void **)&s_items, &s_cap, s_count + 1, TRK_MAX_ITEMS,
+                   sizeof(WindowItem), L"trk"))
+    {
+        LOG(1, L"trk: item dropped, cap=%d", TRK_MAX_ITEMS);
+        return;
+    }
     for (i = s_count; i > idx; i--)
         s_items[i] = s_items[i - 1];
     s_items[idx] = *item;
@@ -66,14 +79,14 @@ static void Remove(HWND hwnd)
     WindowItem *item = Find(hwnd);
     if (!item)
         return;
-    if (item->ownsIcon && item->icon)
-        DestroyIcon(item->icon);
+    LOG(2, L"remove %08x: slot=%d", DBG_HEX(hwnd), item->iconSlot);
+    Icon_ReleaseSlot(item->iconSlot);
     RemoveAt((int)(item - s_items));
     Changed();
 }
 
-/* Всплывающее уведомление (тост, OSD), а не рабочее окно; признаки
-   нарочно консервативные — потерять настоящее окно хуже лишнего таба. */
+/* A popup notification (toast, OSD), not a working window; the signs
+   are deliberately conservative — losing a real window is worse than an extra tab. */
 static BOOL IsSmallerThanHalfMonitor(HWND hwnd)
 {
     RECT rc;
@@ -105,12 +118,12 @@ static BOOL IsNotification(HWND hwnd, LONG_PTR exStyle)
     return IsSmallerThanHalfMonitor(hwnd);
 }
 
-/* Активный фильтр — живой предикат Win11 22621.6199, ReconAddsToTray2 из
-   tests\hooklist.c (см. experimental\riddle-solved.md): классика отправителя
-   shell hook + RecoverWindowsProc + band-таблица XAML-таскбара; APPWINDOW
-   перекрывает TOOLWINDOW/NOACTIVATE и owner. Поверх — локальные отсечения
-   P7 (ITaskList_Deleted, CoreWindow) и cloaked: лента показывает текущий
-   виртуальный стол. */
+/* Active filter — live Win11 22621.6199 predicate, ReconAddsToTray2 from
+   tests\hooklist.c (see experimental\riddle-solved.md): the shell-hook sender's
+   classic checks + RecoverWindowsProc + XAML taskbar band table; APPWINDOW
+   overrides TOOLWINDOW/NOACTIVATE and owner. On top — local rejections
+   P7 (ITaskList_Deleted, CoreWindow) and cloaked: the filmstrip shows the
+   current virtual desktop. */
 static BOOL ReconAddsToTray2(HWND hwnd)
 {
     wchar_t cls[64];
@@ -122,33 +135,33 @@ static BOOL ReconAddsToTray2(HWND hwnd)
     if (!IsWindowVisible(hwnd))
         return FALSE;
 
-    /* Только top-level: winevent шлёт SHOW/NAME и по child-окнам, а предикаты
-       Win11 (shell hook/EnumWindows) их в принципе не видят. */
+    /* Top-level only: winevent sends SHOW/NAME for child windows too, while the
+       Win11 predicates (shell hook/EnumWindows) never see them at all. */
     if (GetAncestor(hwnd, GA_PARENT) != GetDesktopWindow())
         return FALSE;
     if (GetWindowTextLengthW(hwnd) == 0)
         return FALSE;
 
-    /* Кнопку убрали через ITaskbarList::DeleteTab — свойство ставит сама оболочка
-       (проверено tests\deltab). */
+    /* Button removed via ITaskbarList::DeleteTab — the property is set by the
+       shell itself (verified in tests\deltab). */
     if (GetPropW(hwnd, L"ITaskList_Deleted"))
         return FALSE;
 
     haveCls = GetClassNameW(hwnd, cls, 64) != 0;
-    /* «Голый» CoreWindow — shell-инфраструктура (Пуск, поиск, TextInputHost):
-       живой путь Win11 режет его вне предиката — слепая зона v2. */
+    /* A "bare" CoreWindow is shell infrastructure (Start, search, TextInputHost):
+       the live Win11 path filters it outside the predicate — v2 blind spot. */
     if (haveCls && !lstrcmpW(cls, L"Windows.UI.Core.CoreWindow"))
         return FALSE;
-    /* Ghost-дубль зависшего окна — режет IsGhostWindowClass в WCREATED-ветке
-       Taskbar.dll (0x13C470). */
+    /* Ghost duplicate of a hung window — IsGhostWindowClass rejects it in the
+       WCREATED branch of Taskbar.dll (0x13C470). */
     if (haveCls && !lstrcmpW(cls, L"Ghost"))
         return FALSE;
 
     ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    /* Отправитель hook: TOOLWINDOW и NOACTIVATE режут, APPWINDOW перекрывает оба. */
+    /* Hook sender: TOOLWINDOW and NOACTIVATE reject, APPWINDOW overrides both. */
     if (!(ex & WS_EX_APPWINDOW) && (ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)))
         return FALSE;
-    /* IsOwnedWindow/отправитель: owned без APPWINDOW не анонсируется. */
+    /* IsOwnedWindow/sender: owned without APPWINDOW is not announced. */
     if (!(ex & WS_EX_APPWINDOW) && GetWindow(hwnd, GW_OWNER))
         return FALSE;
 
@@ -159,7 +172,7 @@ static BOOL ReconAddsToTray2(HWND hwnd)
                     !lstrcmpW(cls, L"Shell_TrayWnd")))
         return FALSE;
 
-    /* IsValidDesktopZOrderBand; шим при отсутствии API даёт ZBID_DESKTOP. */
+    /* IsValidDesktopZOrderBand; the shim yields ZBID_DESKTOP when the API is absent. */
     GetWindowBand(hwnd, &band);
     if (band != ZBID_DESKTOP && band != ZBID_UIACCESS)
         return FALSE;
@@ -168,8 +181,8 @@ static BOOL ReconAddsToTray2(HWND hwnd)
     return cloaked == 0;
 }
 
-/* Прежний фильтр (классический alt-tab + отсев cloaked-окон): заменён
-   ReconAddsToTray2, не вызывается — оставлен для сравнения и отката. */
+/* Previous filter (classic alt-tab + cloaked-window rejection): replaced by
+   ReconAddsToTray2, not called — kept for comparison and rollback. */
 static BOOL IsAppWindow(HWND hwnd)
 {
     wchar_t cls[64];
@@ -181,14 +194,14 @@ static BOOL IsAppWindow(HWND hwnd)
     if (GetWindowTextLengthW(hwnd) == 0)
         return FALSE;
 
-    /* Кнопку убрали через ITaskbarList::DeleteTab — свойство ставит сама оболочка
-       (проверено tests\deltab). */
+    /* Button removed via ITaskbarList::DeleteTab — the property is set by the
+       shell itself (verified in tests\deltab). */
     if (GetPropW(hwnd, L"ITaskList_Deleted"))
         return FALSE;
 
-    /* «Голый» CoreWindow — shell-инфраструктура (Пуск, поиск): в ленту попадает
-       по UNCLOAKED в момент открытия меню. UWP-приложения представлены хостом
-       ApplicationFrameWindow, поэтому класс безопасно отсекать целиком. */
+    /* A "bare" CoreWindow is shell infrastructure (Start, search): it enters the
+       filmstrip via UNCLOAKED the moment the menu opens. UWP apps are represented
+       by the ApplicationFrameWindow host, so the class can be safely rejected whole. */
     if (GetClassNameW(hwnd, cls, 64) && !lstrcmpW(cls, L"Windows.UI.Core.CoreWindow"))
         return FALSE;
 
@@ -199,7 +212,7 @@ static BOOL IsAppWindow(HWND hwnd)
     if (IsNotification(hwnd, exStyle))
         return FALSE;
 
-    /* Правило alt-tab (Raymond Chen): у owned-цепочки показывается корневой владелец. */
+    /* Alt-tab rule (Raymond Chen): in an owned chain the root owner is shown. */
     if ((exStyle & WS_EX_APPWINDOW) == 0)
     {
         walk = 0;
@@ -223,8 +236,8 @@ static HMONITOR MonitorOf(HWND hwnd)
 {
     WINDOWPLACEMENT placement;
 
-    /* Свёрнутое окно физически уезжает в (-32000,-32000): его монитор —
-       тот, где окно развернётся обратно (rcNormalPosition). */
+    /* A minimized window physically moves to (-32000,-32000): its monitor is
+       the one where the window will be restored (rcNormalPosition). */
     if (IsIconic(hwnd))
     {
         placement.length = sizeof(placement);
@@ -249,7 +262,7 @@ static BOOL UpdateAspect(WindowItem *item)
     double aspect;
     int w, h;
 
-    /* У свёрнутого окна клиентская область — «иконик»-полоса ~160×28 */
+    /* A minimized window's client area is the iconic bar ~160×28 */
     if (IsIconic(item->hwnd))
         return FALSE;
     if (!GetClientRect(item->hwnd, &rc))
@@ -260,7 +273,7 @@ static BOOL UpdateAspect(WindowItem *item)
         return FALSE;
 
     aspect = (double)w / (double)h;
-    /* Переходная геометрия разворачивания даёт дикие пропорции — игнорируем */
+    /* Transitional restore geometry gives wild aspect ratios — ignore */
     if (aspect < 0.2 || aspect > 4.5)
         return FALSE;
     if (aspect - item->aspect < 0.01 && item->aspect - aspect < 0.01)
@@ -275,7 +288,10 @@ static void CreateItem(HWND hwnd, WindowItem *item)
     item->hwnd = hwnd;
     if (GetWindowTextW(hwnd, item->title, TRK_TITLE_MAX) <= 0)
         item->title[0] = L'\0';
-    item->icon = Icon_GetWindow(hwnd, &item->ownsIcon);
+    /* The icon loads asynchronously at first draw (icons.c). */
+    item->iconSlot = -1;
+    item->iconPrio = ICON_PRIO_NONE;
+    item->iconReq = 0;
     item->monitor = NULL;
     item->minimized = IsIconic(hwnd);
     item->aspect = 16.0 / 10.0;
@@ -301,7 +317,7 @@ static void TryAdd(HWND hwnd)
         return;
 
     CreateItem(hwnd, &item);
-    /* Новые живые — сверху; новые свёрнутые — первыми среди полосок */
+    /* New live windows go on top; new minimized ones first among the strips */
     InsertAt(item.minimized ? StripBoundary() : 0, &item);
     Changed();
 }
@@ -315,7 +331,7 @@ static void SetMinimized(HWND hwnd, BOOL minimized)
     item->minimized = minimized;
     if (!minimized)
     {
-        UpdateAspect(item); /* к MINIMIZEEND окно уже в финальной геометрии */
+        UpdateAspect(item); /* by MINIMIZEEND the window is in its final geometry */
         UpdateMonitor(item);
     }
     Reposition((int)(item - s_items));
@@ -333,7 +349,7 @@ static void CALLBACK WinEventProc(
     (void)thread;
     (void)time;
 
-    /* Только сами окна (OBJID_WINDOW == 0), не дочерние объекты accessibility. */
+    /* Only the windows themselves (OBJID_WINDOW == 0), not child accessibility objects. */
     if (idObject != 0 || idChild != 0 || !hwnd)
         return;
 
@@ -367,8 +383,8 @@ static void CALLBACK WinEventProc(
         }
         else
         {
-            /* Многие приложения ставят заголовок уже после показа окна —
-               только теперь оно проходит фильтр. */
+            /* Many apps set the title only after the window is shown —
+               only then does it pass the filter. */
             TryAdd(hwnd);
         }
         break;
@@ -391,7 +407,7 @@ static void CALLBACK WinEventProc(
         item = Find(hwnd);
         if (item && !item->minimized)
         {
-            /* Перетаскивание окна между мониторами переносит тайл в другую панель */
+            /* Dragging a window between monitors moves its tile to another panel */
             dirty = UpdateAspect(item);
             dirty |= UpdateMonitor(item);
             if (dirty)
@@ -414,12 +430,12 @@ void Trk_Start(void)
     static const DWORD ranges[6][2] = {
         {EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND},
         {EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND},
-        /* 0x8001..0x8003: DESTROY, SHOW, HIDE одним диапазоном */
+        /* 0x8001..0x8003: DESTROY, SHOW, HIDE as a single range */
         {EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE},
         {EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE},
-        /* 0x8017..0x8018: CLOAKED, UNCLOAKED (UWP, виртуальные рабочие столы) */
+        /* 0x8017..0x8018: CLOAKED, UNCLOAKED (UWP, virtual desktops) */
         {EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED},
-        /* Ресайз источника меняет аспект тайла */
+        /* Resizing the source changes the tile aspect */
         {EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE},
     };
     int i;
@@ -429,8 +445,8 @@ void Trk_Start(void)
             ranges[i][0], ranges[i][1], NULL, WinEventProc, 0, 0,
             WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-    /* EnumWindows идёт сверху z-order; лента двухсекционная: живые вверху,
-       свёрнутые полоски внизу. */
+    /* EnumWindows walks the z-order top-down; the filmstrip has two sections:
+       live windows on top, minimized strips at the bottom. */
     s_count = 0;
     EnumWindows(EnumProc, 0);
     for (i = 0; i < s_count; i++)
@@ -448,11 +464,23 @@ void Trk_Stop(void)
     for (i = 0; i < s_hookCount; i++)
         UnhookWinEvent(s_hooks[i]);
     s_hookCount = 0;
+    s_count = 0;
+    Util_Free(s_items);
+    s_items = NULL;
+    s_cap = 0;
+}
+
+void Trk_ResetIcons(void)
+{
+    int i;
 
     for (i = 0; i < s_count; i++)
-        if (s_items[i].ownsIcon && s_items[i].icon)
-            DestroyIcon(s_items[i].icon);
-    s_count = 0;
+    {
+        s_items[i].iconSlot = -1;
+        s_items[i].iconPrio = ICON_PRIO_NONE;
+        s_items[i].iconReq = 0;
+    }
+    Changed();
 }
 
 void Trk_RefreshMonitors(void)

@@ -1,10 +1,10 @@
 #include "util.h"
 
 #ifdef MONTABC_TINY
-/* Отменяем intrinsic-статус, чтобы определить функции самостоятельно. */
+/* Remove intrinsic status so we can define the functions ourselves. */
 #pragma function(memset, memcpy)
 
-/* Требуется компоновщику при использовании floating point без CRT. */
+/* Required by the linker when floating point is used without the CRT. */
 int _fltused = 0;
 
 void *memset(void *dst, int val, size_t count)

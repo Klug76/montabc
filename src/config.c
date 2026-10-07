@@ -38,7 +38,7 @@ static void ReadMonitorSection(const WCHAR *section)
         return;
 
     m = &s_mon[s_count++];
-    lstrcpynW(m->device, section + 8, CCHDEVICENAME); /* после "monitor." */
+    lstrcpynW(m->device, section + 8, CCHDEVICENAME); /* past "monitor." */
     GetPrivateProfileStringW(section, L"edge", L"right", buf, 32, s_path);
     m->edge = (buf[0] == L'l') ? DOCK_LEFT : DOCK_RIGHT;
     GetPrivateProfileStringW(section, L"width", L"", buf, 32, s_path);
@@ -86,7 +86,7 @@ MonitorCfg *Cfg_For(const WCHAR *device)
     lstrcpynW(m->device, device, CCHDEVICENAME);
     if (s_count > 1)
     {
-        /* новый монитор наследует геометрию уже настроенной панели */
+        /* a new monitor inherits geometry from an already configured panel */
         m->edge = s_mon[0].edge;
         m->widthPct = s_mon[0].widthPct;
     }

@@ -1,4 +1,5 @@
 #include "appbar.h"
+#include "debug.h"
 
 static void FillData(APPBARDATA *abd, const AppBar *ab)
 {
@@ -17,26 +18,32 @@ void AppBar_Init(AppBar *ab, HWND hwnd, UINT callbackMsg)
 void AppBar_Register(AppBar *ab)
 {
     APPBARDATA abd;
+    UINT_PTR res;
 
     if (ab->registered)
         return;
     FillData(&abd, ab);
-    SHAppBarMessage(ABM_NEW, &abd);
+    res = SHAppBarMessage(ABM_NEW, &abd);
     ab->registered = TRUE;
+    LOG(1, L"appbar ABM_NEW %08x [%s] -> %u",
+        DBG_HEX(ab->hwnd), Log_Wnd(ab->hwnd), (unsigned)res);
 }
 
 void AppBar_Unregister(AppBar *ab)
 {
     APPBARDATA abd;
+    UINT_PTR res;
 
     if (!ab->registered)
         return;
     FillData(&abd, ab);
-    SHAppBarMessage(ABM_REMOVE, &abd);
+    res = SHAppBarMessage(ABM_REMOVE, &abd);
     ab->registered = FALSE;
+    LOG(1, L"appbar ABM_REMOVE %08x [%s] -> %u",
+        DBG_HEX(ab->hwnd), Log_Wnd(ab->hwnd), (unsigned)res);
 }
 
-/* Полоса строго заданной ширины, прижатая к краю. */
+/* A strip of exact width, pinned to the edge. */
 static void ImposeWidth(RECT *rc, DockEdge edge, int width)
 {
     if (edge == DOCK_LEFT)
@@ -55,8 +62,12 @@ RECT AppBar_SetPos(AppBar *ab, DockEdge edge, RECT monitor, int width)
     ImposeWidth(&abd.rc, edge, width);
 
     SHAppBarMessage(ABM_QUERYPOS, &abd);
-    ImposeWidth(&abd.rc, edge, width); /* QUERYPOS искажает ширину */
+    ImposeWidth(&abd.rc, edge, width); /* QUERYPOS distorts the width */
 
     SHAppBarMessage(ABM_SETPOS, &abd);
+    LOG(2, L"appbar SETPOS %08x [%s] edge=%s rc=(%d,%d)-(%d,%d)",
+        DBG_HEX(ab->hwnd), Log_Wnd(ab->hwnd),
+        edge == DOCK_LEFT ? L"left" : L"right",
+        abd.rc.left, abd.rc.top, abd.rc.right, abd.rc.bottom);
     return abd.rc;
 }

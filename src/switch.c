@@ -10,8 +10,8 @@ static void ActivateCore(Switcher *s, HWND goal)
 
     if (!SetForegroundWindow(goal))
     {
-        /* Панель не активируется (WS_EX_NOACTIVATE), поэтому система может
-           держать foreground lock. Имитация нажатия Alt его снимает. */
+        /* The panel is not activatable (WS_EX_NOACTIVATE), so the system may
+           hold a foreground lock. Simulating an Alt press releases it. */
         keybd_event(VK_MENU_ALT, 0, 0, 0);
         keybd_event(VK_MENU_ALT, 0, KEYEVENTF_KEYUP, 0);
         SetForegroundWindow(goal);

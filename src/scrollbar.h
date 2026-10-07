@@ -3,22 +3,22 @@
 #include "montabc.h"
 #include "panel.h"
 
-/* Полупрозрачный оверлей-скроллбар для трекпадов. Отдельное layered
-   owned-popup-окно: owned-окно в z-order всегда выше владельца — а значит,
-   и выше DWM-превью, компонуемых поверх панели. Зона крестиков «дырявая»
-   (HTTRANSPARENT) — клик по ✕ проходит сквозь скроллбар в панель. */
+/* Semi-transparent overlay scrollbar for trackpads. A separate layered
+   owned-popup window: an owned window is always above its owner in z-order —
+   and thus above the DWM thumbnails composed over the panel. The close (✕) zone
+   is "perforated" (HTTRANSPARENT) — a click on ✕ passes through the scrollbar into the panel. */
 typedef struct ScrollBar
 {
     HWND hwnd;
     HWND panelHwnd;
-    Panel *panel; /* панель Panel непрозрачна для scrollbar.c — API через функции */
+    Panel *panel; /* the Panel struct is opaque to scrollbar.c — access via functions */
 
     int totalHeight, viewportHeight, scrollOffset;
     int minThumbPx, width, height;
     BOOL visible, dragging;
-    int dragAnchor; /* расстояние от точки захвата до верха бегунка */
+    int dragAnchor; /* distance from the grab point to the top of the thumb */
 
-    /* кешированная 32bpp-поверхность для UpdateLayeredWindow */
+    /* cached 32bpp surface for UpdateLayeredWindow */
     HDC dibDc;
     HBITMAP dib;
     HGDIOBJ dibOld;
@@ -29,10 +29,10 @@ typedef struct ScrollBar
 void ScrollBar_Create(ScrollBar *sb, Panel *panel, HWND owner, HINSTANCE hInst);
 void ScrollBar_Destroy(ScrollBar *sb);
 
-/* Полоса у внешнего края панели (экранные координаты), от «ручки» до низа. */
+/* Band along the panel's outer edge (screen coordinates), from the "handle" to the bottom. */
 void ScrollBar_Layout(ScrollBar *sb, RECT panelScreen, UINT dpi, BOOL dockRight, int topOffset);
 
-/* Синхронизация с лентой; вызывается панелью после пересчёта раскладки. */
+/* Synchronization with the filmstrip; called by the panel after layout recomputation. */
 void ScrollBar_Update(ScrollBar *sb, int totalHeight, int viewportHeight,
                       int scrollOffset, BOOL pointerNearby);
 void ScrollBar_UpdateVisibility(ScrollBar *sb, BOOL pointerNearby);

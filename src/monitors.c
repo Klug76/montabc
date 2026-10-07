@@ -40,7 +40,7 @@ void Monitors_Enum(DisplayInfo *out, int maxCount, int *count)
     ctx.count = 0;
     EnumDisplayMonitors(NULL, NULL, EnumProc, (LPARAM)&ctx);
 
-    /* слева направо, при равенстве — сверху вниз; вставками: мониторов мало */
+    /* left to right, ties broken top to bottom; insertion sort: few monitors */
     for (i = 1; i < ctx.count; i++)
     {
         DisplayInfo key = out[i];

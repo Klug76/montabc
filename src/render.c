@@ -1,4 +1,5 @@
 #include "render.h"
+#include "icons.h"
 #include "util.h"
 
 /* COLORREF = 0x00BBGGRR */
@@ -78,7 +79,7 @@ static void EnsureBackbuffer(Renderer *r, HDC hdc, int width, int height)
     r->bufH = height;
 }
 
-/* Гриппер-«ручка» сверху: за неё панель перетаскивают на другой монитор/край. */
+/* Header grip: the panel is dragged by it onto another monitor/edge. */
 static void DrawHeaderGrip(Renderer *r, const RECT *client)
 {
     int centerX = (client->left + client->right) / 2;
@@ -93,8 +94,8 @@ static void DrawHeaderGrip(Renderer *r, const RECT *client)
     }
 }
 
-/* Цельная рамка вокруг блока «заголовок + превью». Рисуется НАРУЖУ от
-   bounds: внутри рисовать нельзя — DWM компонует превью поверх нашего GDI. */
+/* Solid frame around the "label + preview" block. Drawn OUTSIDE
+   bounds: drawing inside is not allowed — DWM composites the preview over our GDI. */
 static void DrawOutline(Renderer *r, RECT bounds, HBRUSH brush, int border)
 {
     int i;
@@ -124,9 +125,7 @@ static void DrawLabel(Renderer *r, const LayoutItem *li, BOOL isActive, BOOL clo
 
     iconX = rct.left + r->pad;
     iconY = rct.top + (rct.bottom - rct.top - r->iconSize) / 2;
-    if (li->win->icon)
-        DrawIconEx(r->memDc, iconX, iconY, li->win->icon, r->iconSize, r->iconSize,
-                   0, NULL, DI_NORMAL);
+    Icon_Paint(li->win, r->memDc, iconX, iconY, r->iconList);
 
     close = Layout_CloseRect(rct);
 
@@ -138,7 +137,7 @@ static void DrawLabel(Renderer *r, const LayoutItem *li, BOOL isActive, BOOL clo
     DrawTextW(r->memDc, li->win->title, lstrlenW(li->win->title), &textRect,
               DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
 
-    /* Крестик закрытия приложения */
+    /* Application close X */
     if (closeHover)
         FillRect(r->memDc, &close, s_closeHover);
     SetTextColor(r->memDc, closeHover ? RGB(0xFF, 0xFF, 0xFF) : COL_TEXT_DIM);
@@ -156,6 +155,7 @@ void Rnd_Paint(Renderer *r, HWND hwnd, const Layout *lay, HWND activeWindow,
 
     SetDpi(r, dpi);
     EnsureBrushes();
+    r->iconList = Icon_ListFor(r->iconSize);
 
     hdc = BeginPaint(hwnd, &ps);
     if (!hdc)

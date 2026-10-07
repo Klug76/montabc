@@ -27,7 +27,7 @@
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>Unicode</CharacterSet>
     <PlatformToolset>v145</PlatformToolset>
-    <!-- манифест уже встроен в app.rc -->
+    <!-- manifest is already embedded in app.rc -->
     <GenerateManifest>false</GenerateManifest>
     <Platform>x64</Platform>
   </PropertyGroup>
@@ -37,7 +37,7 @@
     <CharacterSet>Unicode</CharacterSet>
     <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <!-- манифест уже встроен в app.rc -->
+    <!-- manifest is already embedded in app.rc -->
     <GenerateManifest>false</GenerateManifest>
     <Platform>x64</Platform>
   </PropertyGroup>
@@ -47,7 +47,7 @@
     <CharacterSet>Unicode</CharacterSet>
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <!-- манифест уже встроен в app.rc -->
+    <!-- manifest is already embedded in app.rc -->
     <GenerateManifest>false</GenerateManifest>
     <Platform>x64</Platform>
   </PropertyGroup>
@@ -62,15 +62,15 @@
       <ConformanceMode>true</ConformanceMode>
       <SDLCheck>false</SDLCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <!-- исходники UTF-8 без BOM; без ключа cl читает их в ACP и портит кириллицу литералов -->
+      <!-- sources are UTF-8 without BOM; without this flag cl reads them in ACP and corrupts the Cyrillic of string literals -->
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateManifest>false</GenerateManifest>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;shell32.lib;dwmapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;shell32.lib;comctl32.lib;dwmapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <!-- version.h общий для app.rc и C-кода -->
+    <!-- version.h is shared by app.rc and the C code -->
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
@@ -78,7 +78,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;MONTABC_LOG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
@@ -102,7 +102,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;MONTABC_TINY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/Gs999999 %(AdditionalOptions)</AdditionalOptions>
-      <!-- clang-cl (-p:PlatformToolset=ClangCL): -Oz жмёт код сильнее, чем /O1 -->
+      <!-- clang-cl (-p:PlatformToolset=ClangCL): -Oz compresses the code harder than /O1 -->
       <AdditionalOptions Condition="'$(PlatformToolset)'=='ClangCL'">/clang:-Oz %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -112,7 +112,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <!-- .pdata в .text — минус секция; остальное убирает служебные записи линкера (debug directory, Rich) -->
+      <!-- .pdata merged into .text — one section fewer; the rest strips linker bookkeeping records (debug directory, Rich) -->
       <AdditionalOptions>/MERGE:.rdata=.text /MERGE:.pdata=.text /NOCOFFGRPINFO /EMITTOOLVERSIONINFO:NO %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
@@ -128,7 +128,8 @@
   <ItemGroup>
     <ClCompile Include="src\main.c"/>
     <ClCompile Include="src\util.c"/>
-    <!-- определения memset/memcpy (library helpers) несовместимы с /GL в других .obj (C2268) -->
+    <ClCompile Include="src\debug.c"/>
+    <!-- the memset/memcpy definitions (library helpers) are incompatible with /GL in other .obj files (C2268) -->
     <ClCompile Include="src\zerocrt.c">
       <WholeProgramOptimization>false</WholeProgramOptimization>
     </ClCompile>

@@ -5,13 +5,13 @@
 #define SB_WIDTH_LOGICAL 14
 #define SB_MIN_THUMB_LOGICAL 24
 
-/* Классический полупрозрачный серый бегунок; трек почти прозрачен,
-   тело бегунка — умеренная альфа, тёмная кайма держит контур. */
+/* Classic semi-transparent gray thumb; the track is nearly transparent,
+   the thumb body has moderate alpha, and a dark rim holds the outline. */
 static DWORD s_track, s_body, s_bodyDrag, s_border;
 static BOOL s_pixelsReady;
 static BOOL s_classRegistered;
 
-/* Premultiplied-пиксель серого цвета: value × alpha в каждом канале. */
+/* Premultiplied gray pixel: value × alpha in each channel. */
 static DWORD Premultiply(BYTE alpha, BYTE value)
 {
     DWORD c = (DWORD)value * alpha / 255;
@@ -104,7 +104,7 @@ static void EnsureSurface(ScrollBar *sb)
     sb->surfaceH = sb->height;
 }
 
-/* Перерисовка per-pixel-alpha поверхности и подача её в композитор. */
+/* Redraws the per-pixel-alpha surface and feeds it to the compositor. */
 static void Redraw(ScrollBar *sb)
 {
     int thumbTop, thumbHeight, border, thumbBottom, x, y;
@@ -217,7 +217,7 @@ static LRESULT CALLBACK ScrollBar_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
     case WM_NCHITTEST:
     {
         POINT pt;
-        /* Клик по крестику закрытия проходит сквозь скроллбар в панель */
+        /* A click on the close button passes through the scrollbar into the panel */
         pt.x = (short)LOWORD(lp);
         pt.y = (short)HIWORD(lp);
         ScreenToClient(sb->panelHwnd, &pt);
@@ -233,7 +233,7 @@ static LRESULT CALLBACK ScrollBar_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
     {
         int y = (short)HIWORD(lp), thumbTop, thumbHeight;
         ThumbMetrics(sb, &thumbTop, &thumbHeight);
-        /* По бегунку — тащим от точки захвата; по треку — телепорт центром */
+        /* On the thumb — drag from the grab point; on the track — teleport centered */
         sb->dragAnchor = (y >= thumbTop && y < thumbTop + thumbHeight)
                              ? y - thumbTop
                              : thumbHeight / 2;
@@ -253,7 +253,7 @@ static LRESULT CALLBACK ScrollBar_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             DragTo(sb, y, thumbHeight);
         }
         Panel_PointerSeen(sb->panel);
-        /* Иначе не узнаем, что мышь ушла со скроллбара за пределы панели */
+        /* Otherwise we won't know the mouse left the scrollbar outside the panel */
         {
             TRACKMOUSEEVENT tme;
             tme.cbSize = sizeof(tme);
@@ -277,7 +277,7 @@ static LRESULT CALLBACK ScrollBar_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
             if (msg == WM_LBUTTONUP)
                 ReleaseCapture();
             Redraw(sb);
-            Panel_PointerMaybeGone(sb->panel); /* курсор мог уйти с панели во время драга */
+            Panel_PointerMaybeGone(sb->panel); /* the cursor may have left the panel during the drag */
         }
         return 0;
     }
@@ -303,7 +303,7 @@ void ScrollBar_Create(ScrollBar *sb, Panel *panel, HWND owner, HINSTANCE hInst)
         s_classRegistered = TRUE;
     }
 
-    /* Owner (не parent): owned-окно всегда над владельцем в z-order */
+    /* Owner (not parent): an owned window is always above its owner in z-order */
     sb->hwnd = CreateWindowExW(
         WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         SB_CLASS, NULL, WS_POPUP,

@@ -1,7 +1,7 @@
 #pragma once
 
-/* Константы, объявленные в SDK только для WINVER >= 0x0602/0x0605.
-   На Win7 безвредны: сообщения/события просто не приходят. */
+/* Constants declared in the SDK only for WINVER >= 0x0602/0x0605.
+   Harmless on Win7: the messages/events simply never arrive. */
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
 #endif
@@ -15,20 +15,20 @@
 #endif
 
 #ifdef MONTABC_WIN7
-/* GetDpiForWindow появился в Win10 1607: прямой импорт не даст exe
-   загрузиться на Win7, поэтому вызов уходит в шим через GetProcAddress. */
+/* GetDpiForWindow appeared in Win10 1607: a direct import would prevent the
+   exe from loading on Win7, so the call goes through a shim via GetProcAddress. */
 UINT Shim_GetWindowDpi(HWND hwnd);
 #define GetDpiForWindow Shim_GetWindowDpi
 #endif
 
-/* GetWindowBand в SDK-заголовках не объявлен и из user32.lib не импортируется —
-   доступен только через GetProcAddress, и не только на Win7, поэтому шим
-   общий для всех конфигураций. */
+/* GetWindowBand is not declared in SDK headers and not importable from
+   user32.lib — available only via GetProcAddress, and not only on Win7, so
+   the shim is shared by all configurations. */
 HRESULT Shim_GetWindowBand(HWND hwnd, DWORD *band);
 #define GetWindowBand Shim_GetWindowBand
 
-/* ZBID в SDK тоже нет. Разрешены только эти две полосы — остальное
-   (immersive/system/lock) режет таблица ZBID XAML-таскбара
-   (Taskbar.dll rdata 0x27DB54; см. experimental/riddle-solved.md). */
+/* ZBID is not in the SDK either. Only these two bands are allowed — the rest
+   (immersive/system/lock) is cut off by the XAML taskbar ZBID table
+   (Taskbar.dll rdata 0x27DB54; see experimental/riddle-solved.md). */
 #define ZBID_DESKTOP 1
 #define ZBID_UIACCESS 2

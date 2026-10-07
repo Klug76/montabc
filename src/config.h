@@ -8,7 +8,7 @@
 
 typedef struct MonitorCfg
 {
-    WCHAR device[CCHDEVICENAME]; /* ключ — \\.\DISPLAY1 из MONITORINFOEXW */
+    WCHAR device[CCHDEVICENAME]; /* key — \\.\DISPLAY1 from MONITORINFOEXW */
     DockEdge edge;
     double widthPct;
     BOOL enabled;
@@ -17,6 +17,6 @@ typedef struct MonitorCfg
 void Cfg_Load(void);
 void Cfg_Save(void);
 
-/* Настройки монитора; отсутствующая запись заводится по образцу
-   уже настроенной панели, иначе — из секции [default]. */
+/* Monitor settings; a missing entry is created by copying an
+   already configured panel, otherwise from the [default] section. */
 MonitorCfg *Cfg_For(const WCHAR *device);

@@ -2,21 +2,21 @@
 
 #include "montabc.h"
 
-/* Переключение foreground-окон с MRU-историей активации: клик по уже
-   активному окну (и фокус после скрытия) идёт в последнее по истории
-   открытое окно; скрытые в полоску исключаются фильтром. */
+/* Foreground window switching with an MRU activation history: a click on the
+   already active window (and focus after hiding) goes to the most recently
+   opened window in the history; windows hidden to a strip are excluded by the filter. */
 typedef struct Switcher
 {
-    HWND history[32]; /* голова — самое свежее foreground-окно */
+    HWND history[32]; /* head — the most recent foreground window */
     int count;
 
-    /* Фильтр целей автоперехода (панель исключает свёрнутые). */
+    /* Filter for auto-switch targets (the panel excludes minimized ones). */
     BOOL (*IsEligible)(HWND hwnd);
 } Switcher;
 
 void Sw_OnForegroundChanged(Switcher *s, HWND hwnd);
 void Sw_Activate(Switcher *s, HWND target);
 
-/* Активирует последнее по истории открытое окно, пропуская указанное,
-   закрытые окна и всё, что не проходит фильтр. */
+/* Activates the most recently opened window in the history, skipping the given
+   one, closed windows, and anything that fails the filter. */
 void Sw_ActivateMostRecentExcept(Switcher *s, HWND except);

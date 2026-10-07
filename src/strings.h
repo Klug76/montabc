@@ -2,7 +2,7 @@
 
 #include "montabc.h"
 
-/* 1 = русский интерфейс; выбирается один раз по языку системы. */
+/* 1 = Russian UI; selected once from the system language. */
 extern int g_ru;
 
 void Str_Init(void);

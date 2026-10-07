@@ -1,8 +1,9 @@
 #include "thumbs.h"
+#include "debug.h"
 #include "util.h"
 #include <dwmapi.h>
 
-/* Затенение превью активного окна (255 = непрозрачно). */
+/* Dimming of the active window's preview (255 = opaque). */
 #define ACTIVE_OPACITY 110
 
 void Thumbs_Init(Thumbs *T, HWND panel)
@@ -26,8 +27,8 @@ static void RemoveAt(Thumbs *T, int idx)
     T->count--;
 }
 
-/* Видимая область источника: всё окно при zoom=1, иначе фрагмент 1/zoom
-   вокруг нормализованного центра. */
+/* Visible source area: the whole window at zoom=1, otherwise a 1/zoom
+   fragment around the normalized center. */
 static void ComputeSourceRect(const WindowItem *item, RECT *out)
 {
     RECT rc;
@@ -76,13 +77,13 @@ void Thumbs_Sync(Thumbs *T, const Layout *lay, RECT client, HWND activeWindow)
         if (li->isStrip)
             continue;
         if (li->preview.bottom <= client.top || li->preview.top >= client.bottom)
-            continue; /* вне viewport — поток не нужен */
+            continue; /* outside the viewport — no thumbnail stream needed */
 
         source = li->win->hwnd;
         wantCustomSource = li->win->zoom > 1.001;
 
-        /* Сбросить rcSource нельзя (флаги DWM только добавляют) —
-           пересоздаём миниатюру, чтобы DWM снова сам следил за источником. */
+        /* rcSource cannot be reset (DWM flags are additive only) —
+           recreate the thumbnail so DWM tracks the source itself again. */
         idx = Find(T, source);
         if (idx >= 0 && T->entries[idx].customSource && !wantCustomSource)
         {
@@ -95,6 +96,13 @@ void Thumbs_Sync(Thumbs *T, const Layout *lay, RECT client, HWND activeWindow)
         {
             if (FAILED(DwmRegisterThumbnail(T->panel, source, &thumb)))
                 continue;
+            if (!Util_Grow((void **)&T->entries, &T->cap, T->count + 1,
+                           TRK_MAX_ITEMS, sizeof(ThumbEntry), L"thumbs"))
+            {
+                LOG(1, L"thumbs: grow failed, cap=%d", T->cap);
+                DwmUnregisterThumbnail(thumb);
+                continue;
+            }
             idx = T->count++;
             T->entries[idx].source = source;
             T->entries[idx].thumb = thumb;
@@ -103,9 +111,9 @@ void Thumbs_Sync(Thumbs *T, const Layout *lay, RECT client, HWND activeWindow)
 
         dest = Layout_FitRect(li->preview, li->win->aspect);
 
-        /* rcSource задаём только при zoom>1: у окна в переходной геометрии
-           (разворачивание из свёрнутого) GetClientRect даёт «иконик»-полосу,
-           и приколоченный rcSource показывал бы её до следующего события. */
+        /* Set rcSource only at zoom>1: for a window in transitional geometry
+           (restoring from minimized) GetClientRect returns the iconic bar,
+           and a pinned rcSource would keep showing it until the next event. */
         if (wantCustomSource)
             ComputeSourceRect(li->win, &srcRect);
         else
@@ -127,7 +135,7 @@ void Thumbs_Sync(Thumbs *T, const Layout *lay, RECT client, HWND activeWindow)
         T->entries[idx].wanted = TRUE;
     }
 
-    /* Всё, что больше не нужно (полоска, за экраном, окно закрыто) — снять. */
+    /* Anything no longer needed (strip, off-screen, window closed) — unregister. */
     for (i = T->count - 1; i >= 0; i--)
     {
         if (!T->entries[i].wanted)
@@ -144,4 +152,7 @@ void Thumbs_Dispose(Thumbs *T)
     for (i = 0; i < T->count; i++)
         DwmUnregisterThumbnail(T->entries[i].thumb);
     T->count = 0;
+    Util_Free(T->entries);
+    T->entries = NULL;
+    T->cap = 0;
 }

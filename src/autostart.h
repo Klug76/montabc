@@ -2,6 +2,6 @@
 
 #include "montabc.h"
 
-/* Автозапуск: HKCU\...\Run — только по явной команде пользователя. */
+/* Autostart: HKCU\...\Run — only on an explicit user command. */
 BOOL Autostart_IsEnabled(void);
 void Autostart_Toggle(void);

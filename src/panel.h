@@ -10,30 +10,30 @@ BOOL Panel_Create(HINSTANCE hInst, const DisplayInfo *display, MonitorCfg *cfg, 
 void Panel_Destroy(Panel *p);
 void Panel_Invalidate(Panel *p);
 
-/* Монитор переехал/сменил разрешение. */
+/* The monitor moved/changed resolution. */
 void Panel_SetDisplay(Panel *p, const DisplayInfo *display);
 
-/* Имя устройства монитора панели (ключ настроек, \\.\DISPLAY1). */
+/* Panel monitor device name (settings key, \\.\DISPLAY1). */
 const WCHAR *Panel_GetDevice(const Panel *p);
 
-/* Рабочая область монитора залезла под панель — shell потерял полосу. */
+/* The monitor's work area slid under the panel — the shell lost the band. */
 BOOL Panel_IsWorkAreaBroken(const Panel *p);
 
-/* Перерегистрация appbar'а с нуля: после сна/гибернации, рестарта explorer. */
+/* Re-register the appbar from scratch: after sleep/hibernation, explorer restart. */
 void Panel_Reregister(Panel *p);
 
-/* Пересогласовать полосу appbar'а и поставить окно. */
+/* Renegotiate the appbar band and position the window. */
 void Panel_UpdatePosition(Panel *p);
 
-/* Абсолютный скролл ленты (колесо и драг скроллбара). */
+/* Absolute ribbon scroll (wheel and scrollbar drag). */
 void Panel_SetScrollOffset(Panel *p, int offset);
 
-/* Курсор над панелью (или её скроллбаром) — показать скроллбар. */
+/* Cursor over the panel (or its scrollbar) — show the scrollbar. */
 void Panel_PointerSeen(Panel *p);
 void Panel_PointerMaybeGone(Panel *p);
 
-/* Клик по этой точке панели попадает в крестик закрытия? */
+/* Does a click at this point of the panel hit the close X? */
 BOOL Panel_IsOverClose(Panel *p, int x, int y);
 
-/* Пересогласовать полосу appbar'а и поставить окно. */
+/* Renegotiate the appbar band and position the window. */
 void Panel_UpdatePosition(Panel *p);

@@ -2,6 +2,7 @@
 #include "app.h"
 #include "appbar.h"
 #include "autostart.h"
+#include "debug.h"
 #include "layout.h"
 #include "render.h"
 #include "scrollbar.h"
@@ -19,14 +20,14 @@
 #define CMD_HIDE 4
 #define CMD_AUTOSTART 5
 
-/* таймеры */
-#define ACTIVATE_TIMER_ID 1   /* окно ожидания второго клика по живому тайлу */
-#define HOVERZOOM_TIMER_ID 2  /* окно ожидания hover-лупы */
+/* timers */
+#define ACTIVATE_TIMER_ID 1   /* wait window for a second click on a live tile */
+#define HOVERZOOM_TIMER_ID 2  /* wait window for the hover magnifier */
 #define ACTIVATE_DELAY_MS 150
 #define HOVERZOOM_DELAY_MS 700
 #define HOVERZOOM_FACTOR 5.0
 
-/* машина мыши */
+/* mouse state machine */
 #define PS_NONE 0
 #define PS_PRESSED 1
 #define PS_DRAGGING 2
@@ -44,37 +45,35 @@ struct Panel
     BOOL updatingPos;
     BOOL resizing;
 
-    /* лента окон своего монитора */
+    /* ribbon of windows on this monitor */
     Renderer rnd;
     Layout layout;
     Thumbs thumbs;
     ScrollBar sbar;
-    WindowItem *mine[TRK_MAX_ITEMS];
-    int mineCount;
     int scrollOffset;
     BOOL pointerNearby;
 
-    /* DPI-кеш */
+    /* DPI cache */
     int wheelStepPx;
     int repeatRadiusPx;
     int dragThresholdPx;
 
-    /* hover крестика закрытия (HWND окна, а не указатель на item —
-       массив трекера сдвигается, указатель может устареть) */
+    /* close X hover (the window HWND, not a pointer to the item —
+       the tracker array shifts, the pointer may go stale) */
     HWND hoverClose;
     DWORD closeClickTick;
     int closeClickX, closeClickY;
 
-    /* машина мыши */
+    /* mouse state machine */
     int press;
     HWND pressHwnd;
     int pressX, pressY;
     BOOL swallowNextUp;
 
-    /* отложенная активация по клику (150 мс на распознавание двойного) */
+    /* deferred click activation (150 ms to recognize a double click) */
     HWND pendingHwnd;
 
-    /* hover-лупа: наведение на превью без нажатий включает временный zoom */
+    /* hover magnifier: hovering a preview without button presses enables a temporary zoom */
     HWND hoverZoomHwnd;
     HWND hoverCandidateHwnd;
     double savedZoom, savedCenterX, savedCenterY;
@@ -89,7 +88,6 @@ static void Panel_ResizeToScreenX(Panel *p, int screenX);
 static LRESULT CALLBACK Panel_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 static void Panel_SetDpi(Panel *p, UINT dpi);
-static void Panel_CollectMine(Panel *p);
 static void Panel_Menu(Panel *p);
 static void Panel_SetEdge(Panel *p, DockEdge edge);
 static void Panel_OnPress(Panel *p, int x, int y);
@@ -112,19 +110,6 @@ static void Panel_ClearHoverCandidate(Panel *p);
 static void Panel_SetCenterFromPoint(Panel *p, WindowItem *item, int x, int y);
 static void Panel_ResetZoom(WindowItem *item);
 static void Panel_GetCursorClient(Panel *p, POINT *pt);
-/* Окна этого монитора в порядке общей ленты. */
-static void Panel_CollectMine(Panel *p)
-{
-    int i, total = Trk_Count();
-
-    p->mineCount = 0;
-    for (i = 0; i < total && p->mineCount < TRK_MAX_ITEMS; i++)
-    {
-        WindowItem *item = Trk_At(i);
-        if (item->monitor == p->display.hMon)
-            p->mine[p->mineCount++] = item;
-    }
-}
 
 static BOOL PtIn(int x, int y, const RECT *r)
 {
@@ -161,8 +146,8 @@ static void Panel_UpdateCloseHover(Panel *p, int x, int y)
         InvalidateRect(p->hwnd, NULL, FALSE);
     }
 
-    /* Всегда: иначе WM_MOUSELEAVE не придёт, и подсветка крестика
-       «залипнет», когда мышь уйдёт с панели. */
+    /* Always: otherwise WM_MOUSELEAVE never arrives and the close X
+       highlight sticks when the mouse leaves the panel. */
     {
         TRACKMOUSEEVENT tme;
         tme.cbSize = sizeof(tme);
@@ -173,8 +158,8 @@ static void Panel_UpdateCloseHover(Panel *p, int x, int y)
     }
 }
 
-/* Абсолютный скролл ленты; max берётся из раскладки прошлого кадра,
-   как в оригинале. */
+/* Absolute ribbon scroll; max is taken from the previous frame's layout,
+   as in the original. */
 void Panel_SetScrollOffset(Panel *p, int offset)
 {
     RECT client;
@@ -188,7 +173,7 @@ void Panel_SetScrollOffset(Panel *p, int offset)
 
     if (offset == p->scrollOffset)
         return;
-    Panel_CancelHoverZoom(p); /* лента уезжает из-под курсора */
+    Panel_CancelHoverZoom(p); /* the ribbon slides out from under the cursor */
     p->scrollOffset = offset;
     InvalidateRect(p->hwnd, NULL, FALSE);
 }
@@ -201,7 +186,7 @@ void Panel_PointerSeen(Panel *p)
     ScrollBar_UpdateVisibility(&p->sbar, TRUE);
 }
 
-/* Похоже, курсор ушёл; скрываем скроллбар, только если он вне окна панели. */
+/* The cursor probably left; hide the scrollbar only if it is outside the panel window. */
 void Panel_PointerMaybeGone(Panel *p)
 {
     POINT pt;
@@ -228,9 +213,9 @@ BOOL Panel_IsOverClose(Panel *p, int x, int y)
     return PtIn(x, y, &close);
 }
 
-/* Второй клик того же жеста: в пределах double-click-времени (с запасом)
-   и рядом — после закрытия лента сдвигается, под курсором может оказаться
-   крестик чужого окна, его закрывать нельзя. */
+/* A second click of the same gesture: within double-click time (with margin)
+   and nearby — after a close the ribbon shifts, so another window's close X
+   may be under the cursor and must not be closed. */
 static BOOL Panel_IsRepeatClick(Panel *p, int x, int y)
 {
     int dx, dy;
@@ -295,7 +280,7 @@ static void Panel_CancelHoverZoom(Panel *p)
     InvalidateRect(p->hwnd, NULL, FALSE);
 }
 
-/* Центр видимой области по позиции курсора над превью данного окна. */
+/* Center of the visible area from the cursor position over this window's preview. */
 static void Panel_SetCenterFromPoint(Panel *p, WindowItem *item, int x, int y)
 {
     int i;
@@ -318,8 +303,8 @@ static void Panel_SetCenterFromPoint(Panel *p, WindowItem *item, int x, int y)
     }
 }
 
-/* Hover-лупа: задержка над превью включает временный zoom, движение
-   панорамирует, уход с превью — восстановление. */
+/* Hover magnifier: dwelling over a preview enables a temporary zoom, moving
+   pans it, leaving the preview restores. */
 static void Panel_HoverZoomMove(Panel *p, LayoutItem *over, int x, int y)
 {
     BOOL overPreview = over && !over->isStrip && PtIn(x, y, &over->preview);
@@ -365,7 +350,7 @@ static void Panel_TryBeginHoverZoom(Panel *p)
     if (!item || p->press != PS_NONE || p->hoverZoomHwnd)
         return;
 
-    /* Мышь всё ещё над этим же превью? */
+    /* Is the mouse still over the same preview? */
     Panel_GetCursorClient(p, &pt);
     li = Panel_HitTest(p, pt.x, pt.y);
     if (!li || li->isStrip || li->win != item || !PtIn(pt.x, pt.y, &li->preview))
@@ -376,14 +361,14 @@ static void Panel_TryBeginHoverZoom(Panel *p)
     p->savedCenterY = item->centerY;
     p->hoverZoomHwnd = item->hwnd;
 
-    /* Лупа всегда ровно ×5, независимо от постоянного Ctrl-zoom */
+    /* The magnifier is always exactly ×5, regardless of persistent Ctrl-zoom */
     item->zoom = HOVERZOOM_FACTOR;
     SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_SIZEALL));
     Panel_SetCenterFromPoint(p, item, pt.x, pt.y);
     InvalidateRect(p->hwnd, NULL, FALSE);
 }
 
-/* Ctrl+колесо над превью: постоянный zoom ×1..×5. */
+/* Ctrl+wheel over a preview: persistent zoom ×1..×5. */
 static void Panel_CtrlZoom(Panel *p, int wheelDelta)
 {
     WindowItem *item;
@@ -391,7 +376,7 @@ static void Panel_CtrlZoom(Panel *p, int wheelDelta)
     POINT pt;
     double zoom;
 
-    Panel_CancelHoverZoom(p); /* ctrl управляет постоянным zoom, лупа не мешает */
+    Panel_CancelHoverZoom(p); /* ctrl drives the persistent zoom, the magnifier stays out of the way */
     Panel_GetCursorClient(p, &pt);
     li = Panel_HitTest(p, pt.x, pt.y);
     if (!li || li->isStrip || !PtIn(pt.x, pt.y, &li->preview))
@@ -407,7 +392,7 @@ static void Panel_CtrlZoom(Panel *p, int wheelDelta)
     InvalidateRect(p->hwnd, NULL, FALSE);
 }
 
-/* Ctrl+движение мыши над увеличенным превью: центр видимой области. */
+/* Ctrl+mouse move over a zoomed preview: sets the center of the visible area. */
 static void Panel_CtrlPan(Panel *p, LayoutItem *over, int x, int y)
 {
     if (!over || over->isStrip || over->win->zoom <= 1.001)
@@ -424,14 +409,14 @@ static void Panel_EndPress(Panel *p)
     p->pressHwnd = NULL;
     ReleaseCapture();
     if (wasDragging)
-        InvalidateRect(p->hwnd, NULL, FALSE); /* снять подсветку таскаемого */
+        InvalidateRect(p->hwnd, NULL, FALSE); /* clear the dragged-item highlight */
 }
 
 static void Panel_OnPress(Panel *p, int x, int y)
 {
     LayoutItem *li;
 
-    /* «Ручка» сверху или пустая зона — перетаскивание всей панели */
+    /* Top grip or empty area — dragging the whole panel */
     if (y < p->headerPx || (li = Panel_HitTest(p, x, y)) == NULL)
     {
         Panel_CancelPendingActivation(p, NULL);
@@ -441,8 +426,8 @@ static void Panel_OnPress(Panel *p, int x, int y)
         return;
     }
 
-    /* Второй клик двойного детектируем по НАЖАТИЮ: сворачиваем окно
-       системно прямо здесь, а его отпускание глотаем. */
+    /* The second click of a double is detected on PRESS: minimize the window
+       system-side right here and swallow its release. */
     if (p->pendingHwnd && p->pendingHwnd == li->win->hwnd && !li->isStrip)
     {
         Panel_CancelPendingActivation(p, NULL);
@@ -451,9 +436,9 @@ static void Panel_OnPress(Panel *p, int x, int y)
         return;
     }
 
-    /* Нажатие по другому элементу отменяет ожидающую активацию */
+    /* Pressing another item cancels the pending activation */
     Panel_CancelPendingActivation(p, li->win->hwnd);
-    /* Клик не должен внезапно включать hover-лупу */
+    /* A click must not suddenly trigger the hover magnifier */
     Panel_ClearHoverCandidate(p);
 
     p->press = PS_PRESSED;
@@ -473,7 +458,7 @@ static void Panel_DragTo(Panel *p, int x, int y)
     over = Panel_HitTest(p, x, y);
     if (!over || over->win->hwnd == p->pressHwnd)
         return;
-    /* Перетаскивание только внутри своей секции (живые / свёрнутые) */
+    /* Drag only within its own section (live / minimized) */
     if (over->win->minimized != pressItem->minimized)
         return;
     Trk_Move(pressItem, Trk_IndexOf(over->win));
@@ -499,7 +484,7 @@ static void Panel_OnMove(Panel *p, int x, int y, BOOL ctrl)
             Panel_CancelPendingActivation(p, NULL);
             p->press = PS_DRAGGING;
             SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_SIZENS));
-            InvalidateRect(p->hwnd, NULL, FALSE); /* подсветка таскаемого */
+            InvalidateRect(p->hwnd, NULL, FALSE); /* highlight the dragged item */
             Panel_DragTo(p, x, y);
         }
         break;
@@ -514,7 +499,7 @@ static void Panel_OnMove(Panel *p, int x, int y, BOOL ctrl)
         break;
 
     case PS_NONE:
-        /* Один hit-test на движение — общий для лупы, pan и крестика */
+        /* One hit test per move — shared by magnifier, pan, and the close X */
         over = Panel_HitTest(p, x, y);
         if (ctrl)
         {
@@ -530,8 +515,8 @@ static void Panel_OnMove(Panel *p, int x, int y, BOOL ctrl)
     }
 }
 
-/* Бросок панели: свой монитор — смена края по половине экрана,
-   свободный чужой — переезд туда (у занятого своя панель уже есть). */
+/* Dropping the panel: own monitor — switch edge by screen half,
+   free foreign one — move there (an occupied one already has its own panel). */
 static void Panel_DropPanel(Panel *p)
 {
     POINT pt;
@@ -548,7 +533,7 @@ static void Panel_DropPanel(Panel *p)
         return;
     }
 
-    /* Может уничтожить эту панель — дальше по стеку к её полям не обращаться */
+    /* May destroy this panel — do not touch its fields further down the stack */
     App_MovePanel(p, target, pt.x);
 }
 
@@ -565,8 +550,8 @@ static void Panel_OnClick(Panel *p, int x, int y, BOOL ctrl)
         RECT close = Layout_CloseRect(li->label);
         if (PtIn(x, y, &close))
         {
-            /* Повторный клик в зоне крестика: после закрытия лента сдвинулась,
-               под курсором крестик чужого окна — не закрываем его случайно. */
+            /* Repeat click in the close X area: after the close the ribbon shifted,
+               another window's X may be under the cursor — do not close it by accident. */
             if (!Panel_IsRepeatClick(p, x, y))
             {
                 p->closeClickTick = GetTickCount();
@@ -580,7 +565,7 @@ static void Panel_OnClick(Panel *p, int x, int y, BOOL ctrl)
 
     if (ctrl)
     {
-        /* Ctrl+клик — сброс zoom&pan этого превью */
+        /* Ctrl+click — reset this preview's zoom&pan */
         Panel_ResetZoom(item);
         InvalidateRect(p->hwnd, NULL, FALSE);
         return;
@@ -588,21 +573,21 @@ static void Panel_OnClick(Panel *p, int x, int y, BOOL ctrl)
 
     if (!li->isStrip)
     {
-        /* Живой тайл: переключение (или уход вниз z-order, если окно уже
-           активно) после короткого окна ожидания второго клика. Сам второй
-           клик (двойной = свернуть) перехватывается в OnPress. */
+        /* Live tile: activate (or drop to the bottom of the z-order if the
+           window is already active) after a short wait for the second click.
+           The second click (double = minimize) is intercepted in OnPress. */
         p->pendingHwnd = item->hwnd;
         SetTimer(p->hwnd, ACTIVATE_TIMER_ID, ACTIVATE_DELAY_MS, NULL);
         return;
     }
 
-    /* Полоска: мгновенный restore + переключение (Activate сам делает
-       SW_RESTORE). Второй клик двойного попадёт сюда же и ничего не
-       изменит — одинарный и двойной эквивалентны. */
+    /* Strip: instant restore + activate (Activate does SW_RESTORE itself).
+       The second click of a double lands here too and changes nothing —
+       single and double are equivalent. */
     App_Activate(item->hwnd);
 }
 
-/* Системное сворачивание с передачей фокуса следующему по истории окну. */
+/* System minimize, handing focus to the next window in history. */
 static void Panel_Minimize(Panel *p, WindowItem *item)
 {
     BOOL wasForeground;
@@ -616,7 +601,7 @@ static void Panel_Minimize(Panel *p, WindowItem *item)
         App_ActivateMostRecentExcept(item->hwnd);
 }
 
-/* На этом мониторе есть ещё несвёрнутые окна, кроме данного? */
+/* Are there other non-minimized windows on this monitor besides this one? */
 static BOOL Panel_HasOtherLive(Panel *p, const WindowItem *item)
 {
     int i, total = Trk_Count();
@@ -630,8 +615,8 @@ static BOOL Panel_HasOtherLive(Panel *p, const WindowItem *item)
     return FALSE;
 }
 
-/* Уводит окно под все остальные, не сворачивая (повторный клик по
-   активному тайлу). Единственное живое окно монитора остаётся как есть. */
+/* Sends the window below all the others without minimizing (a repeat click
+   on the active tile). The monitor's only live window is left untouched. */
 static void Panel_SendToBottom(Panel *p, WindowItem *item)
 {
     HWND next;
@@ -642,8 +627,8 @@ static void Panel_SendToBottom(Panel *p, WindowItem *item)
     SetWindowPos(item->hwnd, HWND_BOTTOM, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-    /* Фокус — тому, что теперь оказалось сверху, а не последнему по истории:
-       иначе повторение жеста чередует два окна вместо обхода всей стопки. */
+    /* Focus goes to whatever is now on top, not to the next in history:
+       otherwise repeating the gesture alternates two windows instead of cycling the stack. */
     if (item->hwnd != g_foreground)
         return;
     next = Panel_TopWindowExcept(p, item);
@@ -651,7 +636,7 @@ static void Panel_SendToBottom(Panel *p, WindowItem *item)
         App_Activate(next);
 }
 
-/* Верхнее по z-order живое окно этого монитора, кроме указанного. */
+/* The topmost live window of this monitor in z-order, except the given one. */
 static HWND Panel_TopWindowExcept(Panel *p, const WindowItem *item)
 {
     HWND probe = GetTopWindow(NULL);
@@ -686,7 +671,7 @@ static void EnsureClass(HINSTANCE hInst)
     wc.hInstance = hInst;
     wc.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(1));
     wc.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
-    wc.hbrBackground = NULL; /* весь фон рисуем сами в WM_PAINT */
+    wc.hbrBackground = NULL; /* we draw the entire background in WM_PAINT */
     wc.lpszMenuName = NULL;
     wc.lpszClassName = PANEL_CLASS;
     wc.hIconSm = NULL;
@@ -697,7 +682,7 @@ static void EnsureClass(HINSTANCE hInst)
 
 BOOL Panel_Create(HINSTANCE hInst, const DisplayInfo *display, MonitorCfg *cfg, Panel **out)
 {
-    Panel *p = (Panel *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(Panel));
+    Panel *p = (Panel *)Util_Alloc(sizeof(Panel));
 
     if (!p)
         return FALSE;
@@ -714,7 +699,7 @@ BOOL Panel_Create(HINSTANCE hInst, const DisplayInfo *display, MonitorCfg *cfg, 
         NULL, NULL, hInst, p);
     if (!p->hwnd)
     {
-        HeapFree(GetProcessHeap(), 0, p);
+        Util_Free(p);
         return FALSE;
     }
 
@@ -736,7 +721,8 @@ void Panel_Destroy(Panel *p)
     if (p->hwnd)
         DestroyWindow(p->hwnd);
     Rnd_Destroy(&p->rnd);
-    HeapFree(GetProcessHeap(), 0, p);
+    Util_Free(p->layout.items);
+    Util_Free(p);
 }
 
 void Panel_Invalidate(Panel *p)
@@ -756,9 +742,9 @@ const WCHAR *Panel_GetDevice(const Panel *p)
     return p->display.device;
 }
 
-/* Рабочая область залезла под панель: shell потерял нашу полосу
-   (выход из сна/гибернации, сброс work area). При тяге и
-   пересогласовании позиции перекрытие штатно. */
+/* The work area slid under the panel: the shell lost our bar
+   (wake from sleep/hibernation, work area reset). Overlap during a drag
+   or position renegotiation is normal. */
 BOOL Panel_IsWorkAreaBroken(const Panel *p)
 {
     MONITORINFO mi;
@@ -771,14 +757,23 @@ BOOL Panel_IsWorkAreaBroken(const Panel *p)
     mi.cbSize = sizeof(mi);
     if (!GetMonitorInfoW(p->display.hMon, &mi))
         return FALSE;
-    /* Панели докованы по X во всю высоту — значимо пересечение по X. */
-    return min(wnd.right, mi.rcWork.right) > max(wnd.left, mi.rcWork.left);
+    /* Panels are docked along X for the full height — the X overlap is what matters. */
+    if (min(wnd.right, mi.rcWork.right) > max(wnd.left, mi.rcWork.left))
+    {
+        LOG(2, L"panel %08x [%s] broken: wnd=(%d,%d)-(%d,%d) work=(%d,%d)-(%d,%d)",
+            DBG_HEX(p->hwnd), Log_Wnd(p->hwnd),
+            wnd.left, wnd.top, wnd.right, wnd.bottom,
+            mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom);
+        return TRUE;
+    }
+    return FALSE;
 }
 
-/* Регистрация appbar'а с нуля: после сна и рестарта explorer.
-   AppBar_Register но-опит по флагу registered, поэтому сначала ABM_REMOVE. */
+/* Appbar registration from scratch: after sleep and explorer restart.
+   AppBar_Register is a no-op based on the registered flag, so ABM_REMOVE first. */
 void Panel_Reregister(Panel *p)
 {
+    LOG(1, L"panel reregister %08x [%s]", DBG_HEX(p->hwnd), Log_Wnd(p->hwnd));
     AppBar_Unregister(&p->appbar);
     AppBar_Register(&p->appbar);
     Panel_UpdatePosition(p);
@@ -798,8 +793,8 @@ void Panel_UpdatePosition(Panel *p)
     width = Panel_CalcWidth(p, pct);
 
     rc = AppBar_SetPos(&p->appbar, p->cfg->edge, p->display.rc, width);
-    /* Бит WS_EX_TOPMOST рассинхронизируется с фактическим z-order —
-       переутверждаем topmost при каждом размещении. */
+    /* The WS_EX_TOPMOST bit desyncs from the actual z-order —
+       reassert topmost on every placement. */
     SetWindowPos(p->hwnd, HWND_TOPMOST,
                  rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
                  SWP_NOACTIVATE);
@@ -816,12 +811,12 @@ static void Panel_SetDpi(Panel *p, UINT dpi)
     p->dpi = dpi;
     p->gripPx = Ui_Scale(GRIP_LOGICAL, dpi);
     p->headerPx = Ui_Scale(LAY_HEADER_LOGICAL, dpi);
-    p->wheelStepPx = Ui_Scale(60, dpi); /* px за один щелчок колеса */
+    p->wheelStepPx = Ui_Scale(60, dpi); /* px per wheel click */
     p->repeatRadiusPx = Ui_Scale(16, dpi);
     p->dragThresholdPx = Ui_Scale(8, dpi);
 }
 
-/* Зона захвата ресайза — узкая полоса вдоль внутреннего края панели. */
+/* The resize grab zone is a narrow strip along the panel's inner edge. */
 static BOOL Panel_InGrip(Panel *p, int clientX)
 {
     RECT rc;
@@ -831,7 +826,7 @@ static BOOL Panel_InGrip(Panel *p, int clientX)
                : clientX < p->gripPx;
 }
 
-/* Ширина панели в пикселях: процент от монитора, минимум 40px. */
+/* Panel width in pixels: a percentage of the monitor, minimum 40px. */
 static int Panel_CalcWidth(const Panel *p, double pct)
 {
     int monW = p->display.rc.right - p->display.rc.left;
@@ -841,8 +836,8 @@ static int Panel_CalcWidth(const Panel *p, double pct)
     return width;
 }
 
-/* Лёгкая установка размера БЕЗ переговоров с shell — только в процессе drag,
-   чтобы максимизированные окна не переезжали на каждом шаге. */
+/* Lightweight resize WITHOUT shell negotiation — only while dragging,
+   so maximized windows do not move on every step. */
 static void Panel_DragSetSize(Panel *p)
 {
     double pct = Util_ClampD(p->cfg->widthPct, CFG_MIN_WIDTH, CFG_MAX_WIDTH);
@@ -856,12 +851,12 @@ static void Panel_DragSetSize(Panel *p)
 
     SetWindowPos(p->hwnd, HWND_TOPMOST, rc.left, rc.top,
                  rc.right - rc.left, rc.bottom - rc.top, SWP_NOACTIVATE);
-    /* WM_PAINT низкоприоритетен (генерируется лишь при пустой очереди) и при
-       потоке WM_MOUSEMOVE запаздывает — форсируем перерисовку немедленно. */
+    /* WM_PAINT is low priority (generated only when the queue is empty) and
+       lags behind a stream of WM_MOUSEMOVE — force the repaint immediately. */
     UpdateWindow(p->hwnd);
 }
 
-/* Ширина по экранной X курсора, clamp 3–50%; дрожание меньше 0.05% глушим. */
+/* Width from the cursor's screen X, clamp 3–50%; jitter below 0.05% is ignored. */
 static void Panel_ResizeToScreenX(Panel *p, int screenX)
 {
     int monW = p->display.rc.right - p->display.rc.left;
@@ -907,7 +902,7 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             Panel_UpdatePosition(p);
             break;
         case ABN_FULLSCREENAPP:
-            /* Полноэкранное приложение: уходим вниз z-order, потом возвращаемся. */
+            /* Fullscreen application: drop to the bottom of the z-order, then come back. */
             SetWindowPos(p->hwnd, lp ? HWND_BOTTOM : HWND_TOPMOST,
                          0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -922,8 +917,7 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
         RECT client;
         GetClientRect(hwnd, &client);
-        Panel_CollectMine(p);
-        Layout_Compute(&p->layout, p->mine, p->mineCount, client, p->dpi, p->scrollOffset);
+        Layout_Compute(&p->layout, p->display.hMon, client, p->dpi, p->scrollOffset);
         Thumbs_Sync(&p->thumbs, &p->layout, client, g_foreground);
         Rnd_Paint(&p->rnd, hwnd, &p->layout, g_foreground, p->dpi, p->hoverClose);
         ScrollBar_Update(&p->sbar, p->layout.totalHeight, client.bottom - client.top,
@@ -959,7 +953,7 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             p->pendingHwnd = NULL;
             if (item && IsWindow(item->hwnd))
             {
-                /* Клик по уже активному окну убирает его назад, а не переключает */
+                /* Clicking an already active window sends it back instead of switching */
                 if (item->hwnd == g_foreground)
                     Panel_SendToBottom(p, item);
                 else
@@ -980,24 +974,24 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_ERASEBKGND:
-        return 1; /* всё рисуется в WM_PAINT */
+        return 1; /* everything is drawn in WM_PAINT */
 
     case WM_RBUTTONDOWN:
-        return 0; /* жест целиком обрабатывается на отпускании */
+        return 0; /* the gesture is handled entirely on release */
 
     case WM_RBUTTONUP:
     {
         int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
         LayoutItem *li;
 
-        /* Меню осталось за «ручкой» вверху и пустой частью ленты */
+        /* The menu belongs to the top grip and the empty part of the ribbon */
         if (y < p->headerPx || (li = Panel_HitTest(p, x, y)) == NULL)
         {
             Panel_Menu(p);
             return 0;
         }
         if (li->isStrip)
-            return 0; /* свёрнутое окно сворачивать некуда */
+            return 0; /* a minimized window cannot be minimized further */
         Panel_CancelPendingActivation(p, NULL);
         Panel_Minimize(p, li->win);
         return 0;
@@ -1007,7 +1001,7 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (Panel_InGrip(p, (short)LOWORD(lp)))
         {
             p->resizing = TRUE;
-            /* Панель могла быть утоплена fullscreen-приложением — вернуть наверх. */
+            /* The panel may have been sunk by a fullscreen application — bring it back up. */
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                          SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             SetCapture(hwnd);
@@ -1033,15 +1027,15 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         {
             p->resizing = FALSE;
             ReleaseCapture();
-            /* Переговоры с shell один раз в конце drag: work area и
-               максимизированные окна перестраиваются по итоговой ширине. */
+            /* Shell negotiation once at the end of the drag: the work area and
+               maximized windows reflow to the final width. */
             Panel_UpdatePosition(p);
             Cfg_Save();
             return 0;
         }
         if (p->swallowNextUp)
         {
-            /* Отпускание второго клика двойного — жест обработан на DOWN */
+            /* Release of the second click of a double — the gesture was handled on DOWN */
             p->swallowNextUp = FALSE;
             Panel_EndPress(p);
             return 0;
@@ -1053,7 +1047,7 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         else if (p->press == PS_PANEL_DRAG)
         {
             Panel_EndPress(p);
-            Panel_DropPanel(p); /* может уничтожить панель — выходим */
+            Panel_DropPanel(p); /* may destroy the panel — return */
             return 0;
         }
         else
@@ -1079,7 +1073,7 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 SetCursor(LoadCursorW(NULL, (LPCWSTR)IDC_SIZEALL));
                 return 1;
             }
-            /* Активная hover-лупа или Ctrl над увеличенным превью — режим pan */
+            /* Active hover magnifier or Ctrl over a zoomed preview — pan mode */
             {
                 LayoutItem *li = Panel_HitTest(p, pt.x, pt.y);
                 BOOL ctrlHeld = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -1095,12 +1089,14 @@ static LRESULT Panel_Handle(Panel *p, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         break;
 
     case WM_DPICHANGED:
+        LOG(1, L"WM_DPICHANGED dpi=%u", (unsigned)LOWORD(wp));
         Panel_SetDpi(p, (UINT)LOWORD(wp));
         Panel_UpdatePosition(p);
+        App_ScheduleIconRebuild();
         return 0;
 
     case WM_CLOSE:
-        /* Внешний сигнал завершения — выходит всё приложение. */
+        /* External termination signal — the whole application exits. */
         App_Exit();
         return 0;
 
@@ -1138,7 +1134,7 @@ static void Panel_Menu(Panel *p)
     AppendMenuW(menu, MF_STRING, CMD_EXIT, STR_S(L"Выход", L"Exit"));
 
     GetCursorPos(&pt);
-    /* Без этого меню у неактивируемого окна не закрывается кликом мимо. */
+    /* Without this, the menu of a non-activatable window does not dismiss on an outside click. */
     SetForegroundWindow(p->hwnd);
     cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
                          pt.x, pt.y, 0, p->hwnd, NULL);
@@ -1154,7 +1150,7 @@ static void Panel_Menu(Panel *p)
         Panel_SetEdge(p, DOCK_RIGHT);
         break;
     case CMD_HIDE:
-        /* Уничтожит эту панель — дальше по стеку к её полям не обращаемся */
+        /* Will destroy this panel — do not touch its fields further down the stack */
         App_SetEnabled(Panel_GetDevice(p), FALSE);
         break;
     case CMD_AUTOSTART:

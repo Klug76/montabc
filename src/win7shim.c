@@ -43,8 +43,8 @@ HRESULT Shim_GetWindowBand(HWND hwnd, DWORD *band)
         pfn = (PFN_GetWindowBand)(void *)GetProcAddress(
             GetModuleHandleW(L"user32.dll"), "GetWindowBand");
     }
-    /* API нет (Win7/8) или вызов не удался: окно считается desktop-полосой —
-       не теряем его (семантика BandAllowed из tests/hooklist.c). */
+    /* API missing (Win7/8) or the call failed: the window is treated as
+       the desktop band — not lost (BandAllowed semantics from tests/hooklist.c). */
     if (pfn && SUCCEEDED(pfn(hwnd, band)))
         return S_OK;
     *band = ZBID_DESKTOP;

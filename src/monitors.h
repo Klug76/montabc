@@ -6,9 +6,9 @@ typedef struct DisplayInfo
 {
     HMONITOR hMon;
     WCHAR device[CCHDEVICENAME];
-    RECT rc; /* полный прямоугольник монитора, не рабочая область */
+    RECT rc; /* full monitor rectangle, not the work area */
     BOOL primary;
 } DisplayInfo;
 
-/* Заполняет out мониторами, отсортированными слева направо. */
+/* Fills out with monitors sorted left to right. */
 void Monitors_Enum(DisplayInfo *out, int maxCount, int *count);

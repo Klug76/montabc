@@ -8,10 +8,10 @@
 #define TRAY_CLASS L"montabc.tray"
 #define TRAY_CALLBACK (WM_APP + 1)
 #define TRAY_ICON_ID 1
-/* Яркость и непрозрачность иконки в состоянии «панели скрыты» */
+/* Brightness and opacity of the icon in the "panels hidden" state */
 #define TRAY_DIM_PERCENT 60
 
-/* Команды монитора: CMD_MONITOR_BASE + индекс * MONITOR_STRIDE + действие */
+/* Monitor commands: CMD_MONITOR_BASE + index * MONITOR_STRIDE + action */
 #define CMD_AUTOSTART 1
 #define CMD_EXIT 2
 #define CMD_MONITOR_BASE 100
@@ -23,8 +23,8 @@
 static struct
 {
     HWND hwnd;
-    HICON icon;       /* цветная: панели на экранах */
-    HICON iconHidden; /* приглушённая: панели скрыты */
+    HICON icon;       /* colored: panels visible on screens */
+    HICON iconHidden; /* dimmed: panels hidden */
     BOOL showingHidden;
     UINT taskbarCreated;
 } T;
@@ -38,12 +38,12 @@ static HICON LoadTrayIcon(HINSTANCE hInst, int cx, int cy)
     HANDLE handle = LoadImageW(hInst, MAKEINTRESOURCEW(1), IMAGE_ICON, cx, cy,
                                LR_DEFAULTCOLOR);
 
-    /* Без ресурса — хотя бы системная заглушка */
+    /* No resource — fall back to the system placeholder icon */
     return handle ? (HICON)handle : LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
 }
 
-/* Обесцвеченная и приглушённая копия иконки — состояние «панели скрыты».
-   Отдельного ресурса нет намеренно: рисунок один, вариант считается из него. */
+/* Desaturated, dimmed copy of the icon — the "panels hidden" state.
+   No separate resource on purpose: one image, the variant is derived from it. */
 static HICON CreateDimmed(HICON source, int cx, int cy)
 {
     BITMAPINFO bmi;
@@ -73,7 +73,7 @@ static HICON CreateDimmed(HICON source, int cx, int cy)
     SelectObject(dc, oldBmp);
     DeleteDC(dc);
 
-    /* Пиксели premultiplied: серый берём как есть, гасим цвет и альфу вместе */
+    /* Pixels are premultiplied: take gray as is, dim color and alpha together */
     px = (DWORD *)bits;
     for (i = 0; i < cx * cy; i++)
     {
@@ -91,7 +91,7 @@ static HICON CreateDimmed(HICON source, int cx, int cy)
         px[i] = (a << 24) | (gray << 16) | (gray << 8) | gray;
     }
 
-    /* 32-битной иконке маска не нужна по существу, но CreateIconIndirect её требует */
+    /* A 32-bit icon does not really need a mask, but CreateIconIndirect requires one */
     mask = CreateBitmap(cx, cy, 1, 1, NULL);
     {
         ICONINFO info;
@@ -199,7 +199,7 @@ static void ShowMenu(void)
         AppendMenuW(sub, Check(MF_STRING, mon->edge == DOCK_RIGHT), baseCmd + MONITOR_RIGHT,
                     STR_S(L"Справа", L"Dock right"));
 
-        /* «Монитор 1 · 2560×1440 (основной)» */
+        /* "Display 1 · 2560×1440 (primary)" */
         wsprintfW(label, STR_S(L"Монитор %d · %d×%d", L"Display %d · %d×%d"),
                   i + 1, d->rc.right - d->rc.left, d->rc.bottom - d->rc.top);
         if (d->primary)
@@ -215,13 +215,13 @@ static void ShowMenu(void)
     AppendMenuW(menu, MF_STRING, CMD_EXIT, STR_S(L"Выход", L"Exit"));
 
     GetCursorPos(&pt);
-    /* Классическая пара из MSDN: без неё меню трея не закрывается кликом мимо */
+    /* Classic pair from MSDN: without it the tray menu does not close on an outside click */
     SetForegroundWindow(T.hwnd);
     cmd = TrackPopupMenu(menu,
                          TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_RIGHTALIGN | TPM_BOTTOMALIGN,
                          pt.x, pt.y, 0, T.hwnd, NULL);
     PostMessageW(T.hwnd, WM_NULL, 0, 0);
-    DestroyMenu(menu); /* вместе с подменю */
+    DestroyMenu(menu); /* along with submenus */
 
     if (cmd >= CMD_MONITOR_BASE)
     {
@@ -260,7 +260,7 @@ static LRESULT CALLBACK Tray_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == T.taskbarCreated && T.taskbarCreated)
     {
-        /* Explorer перезапустился — иконку нужно добавить заново */
+        /* Explorer restarted — the icon must be re-added */
         Add();
         return 0;
     }
@@ -271,14 +271,14 @@ static LRESULT CALLBACK Tray_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
         UINT mouse = (UINT)(lp & 0xFFFF);
         if (mouse == WM_LBUTTONUP)
-            App_ToggleHidden(); /* быстрое «убрать/вернуть панели на всех экранах» */
+            App_ToggleHidden(); /* quick "hide/restore panels on all screens" */
         else if (mouse == WM_RBUTTONUP)
             ShowMenu();
         return 0;
     }
 
     case WM_ENDSESSION:
-        /* Выключение/перезагрузка Windows: WM_DESTROY может не прийти */
+        /* Windows shutdown/reboot: WM_DESTROY may never arrive */
         if (wp)
             Cfg_Save();
         return 0;
@@ -308,14 +308,15 @@ void Tray_Create(HINSTANCE hInst)
     wc.lpszClassName = TRAY_CLASS;
     RegisterClassExW(&wc);
 
-    /* Окно не показывается, но обычное (не message-only): меню всплывающего
-       типа требует владельца, способного стать foreground. */
-    T.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, TRAY_CLASS, APP_NAME, WS_POPUP,
-                             0, 0, 0, 0, NULL, NULL, hInst, NULL);
-
+    /* The window is never shown, but is a normal (not message-only) one: a popup
+       menu requires an owner capable of becoming the foreground window. */
+    /* WndProc starts firing inside CreateWindowExW, so its state must be ready */
     T.taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     cx = GetSystemMetrics(SM_CXSMICON);
     cy = GetSystemMetrics(SM_CYSMICON);
+
+    T.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, TRAY_CLASS, APP_NAME, WS_POPUP,
+                             0, 0, 0, 0, NULL, NULL, hInst, NULL);
     T.icon = LoadTrayIcon(hInst, cx, cy);
     T.iconHidden = CreateDimmed(T.icon, cx, cy);
     Add();

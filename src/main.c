@@ -1,6 +1,8 @@
 #include "montabc.h"
 #include "app.h"
 #include "config.h"
+#include "debug.h"
+#include "icons.h"
 #include "monitors.h"
 #include "panel.h"
 #include "strings.h"
@@ -11,11 +13,15 @@
 #define HOST_CLASS L"montabc.host"
 #define SINGLE_INSTANCE_MUTEX L"Local\\montabc.single-instance"
 
-/* Самолечение appbar'ов: shell после сна/гибернации может сбросить
-   рабочую область; проверка откладывается — ему нужно время устаканиться. */
+/* AppBar self-healing: after sleep/hibernation the shell may reset the
+   work area; the check is delayed — it needs time to settle. */
 #define HEAL_TIMER_ID 1
 #define HEAL_DELAY_MS 1500
 #define HEAL_MAX_ATTEMPTS 3
+
+/* Icon rebuild: events arrive in bursts — debounced by a timer on the host. */
+#define ICON_REBUILD_TIMER_ID 2
+#define ICON_REBUILD_DELAY_MS 500
 
 typedef struct
 {
@@ -34,10 +40,14 @@ static struct
     PanelSlot panels[APP_MAX_MONITORS];
     int panelCount;
     BOOL exiting;
-    BOOL hidden; /* быстрое «скрыть всё» из трея: настройки мониторов целы */
+    BOOL hidden; /* quick "hide all" from the tray: monitor settings kept intact */
 } S;
 
 static Switcher g_switch;
+
+/* System small-icon size; a change triggers the icon rebuild. */
+static int s_smIconX = -1;
+static int s_smIconY = -1;
 
 void App_Activate(HWND hwnd)
 {
@@ -49,7 +59,7 @@ void App_ActivateMostRecentExcept(HWND except)
     Sw_ActivateMostRecentExcept(&g_switch, except);
 }
 
-/* Автопереходы по истории не идут в свёрнутые окна. */
+/* Automatic history-based activation never targets minimized windows. */
 static BOOL App_IsEligible(HWND hwnd)
 {
     WindowItem *item = Trk_Find(hwnd);
@@ -70,8 +80,8 @@ static const DisplayInfo *App_FindDisplay(HMONITOR mon)
     return NULL;
 }
 
-/* Панель бросили на другой монитор: если он свободен — переезжаем туда,
-   у занятого своя панель уже есть, и трогать её незачем. */
+/* A panel was dropped onto another monitor: if it is free — move there;
+   an occupied one already has its own panel, no need to touch it. */
 void App_MovePanel(Panel *panel, HMONITOR target, int cursorX)
 {
     const DisplayInfo *display = App_FindDisplay(target);
@@ -91,7 +101,7 @@ void App_MovePanel(Panel *panel, HMONITOR target, int cursorX)
     if (cfg)
         cfg->enabled = FALSE;
     Cfg_Save();
-    App_RefreshDisplays(); /* уничтожит panel — вызывающий уже не обращается к ней */
+    App_RefreshDisplays(); /* destroys panel — the caller must not use it afterwards */
 }
 
 void App_Exit(void)
@@ -103,6 +113,7 @@ void App_Exit(void)
     S.exiting = TRUE;
 
     Trk_Stop();
+    Icon_Shutdown();
     Cfg_Save();
 
     for (i = 0; i < S.panelCount; i++)
@@ -133,7 +144,7 @@ static void App_OnTrackerChanged(void)
         Panel_Invalidate(S.panels[i].panel);
 }
 
-/* Пересобирает набор панелей под текущие мониторы и настройки. */
+/* Rebuilds the set of panels to match the current monitors and settings. */
 void App_RefreshDisplays(void)
 {
     int i, j;
@@ -141,7 +152,7 @@ void App_RefreshDisplays(void)
 
     Monitors_Enum(S.displays, APP_MAX_MONITORS, &S.displayCount);
 
-    /* Монитор отключили, панель выключили или скрыли всё — окно не нужно */
+    /* Monitor removed, panel disabled, or everything hidden — the window is not needed */
     for (i = 0; i < S.panelCount;)
     {
         BOOL alive = FALSE;
@@ -183,8 +194,8 @@ void App_RefreshDisplays(void)
     Tray_SyncIcon();
 }
 
-/* Левый клик по иконке в трее: убрать/вернуть панели на всех мониторах.
-   Настройки мониторов не трогаются — при возврате всё как было. */
+/* Left click on the tray icon: hide/restore panels on all monitors.
+   Monitor settings are untouched — everything is restored as it was. */
 void App_ToggleHidden(void)
 {
     S.hidden = !S.hidden;
@@ -199,7 +210,7 @@ BOOL App_IsHidden(void)
 void App_SetEnabled(const WCHAR *device, BOOL enabled)
 {
     MonitorCfg *mon = Cfg_For(device);
-    /* Включение панели из меню — явная просьба её показать, снимает «скрыть всё» */
+    /* Enabling a panel from the menu is an explicit request to show it, clears "hide all" */
     BOOL unhide = enabled && S.hidden;
 
     if (!mon || (mon->enabled == enabled && !unhide))
@@ -243,7 +254,7 @@ void App_ReregisterAppBars(void)
         Panel_Reregister(S.panels[i].panel);
 }
 
-/* Починка панелей, под которые залезла рабочая область. */
+/* Repairs panels whose area was taken over by the work area. */
 BOOL App_HealAppBars(void)
 {
     BOOL healed = FALSE;
@@ -264,11 +275,20 @@ static void Host_ScheduleHeal(BOOL resetAttempts)
     SetTimer(S.hwndHost, HEAL_TIMER_ID, HEAL_DELAY_MS, NULL);
 }
 
+/* Calling SetTimer again with the same ID restarts the countdown — burst debounce. */
+void App_ScheduleIconRebuild(void)
+{
+    LOG0(2, L"rebuild scheduled");
+    if (S.hwndHost)
+        SetTimer(S.hwndHost, ICON_REBUILD_TIMER_ID, ICON_REBUILD_DELAY_MS, NULL);
+}
+
 static LRESULT CALLBACK Host_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == S.taskbarCreated && S.taskbarCreated)
     {
-        /* Explorer перезапустился и забыл все appbar'ы — регистрируемся заново. */
+        /* Explorer restarted and took all appbars with it — re-register. */
+        LOG0(1, L"TaskbarCreated: explorer restarted");
         App_ReregisterAppBars();
         return 0;
     }
@@ -276,40 +296,75 @@ static LRESULT CALLBACK Host_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     switch (msg)
     {
     case WM_DISPLAYCHANGE:
+        LOG0(1, L"WM_DISPLAYCHANGE");
         App_RefreshDisplays();
         Trk_RefreshMonitors();
         Host_ScheduleHeal(TRUE);
         return 0;
 
     case WM_POWERBROADCAST:
-        /* Выход из сна/гибернации: shell может сбросить work area. */
+        /* Resume from sleep/hibernation: the shell may reset the work area. */
         if (wp == PBT_APMRESUMESUSPEND || wp == PBT_APMRESUMEAUTOMATIC)
         {
+            LOG0(1, L"WM_POWERBROADCAST: resume");
             Host_ScheduleHeal(TRUE);
             return TRUE;
         }
         break;
 
     case WM_SETTINGCHANGE:
-        /* Чужой сброс рабочей области. Свой ABM_SETPOS тоже рассылает
-           SPI_SETWORKAREA — счётчик не сбрасываем, проверка пассивна. */
+        /* Work area reset by someone else. Our own ABM_SETPOS also broadcasts
+           SPI_SETWORKAREA — do not reset the counter, the check is passive. */
         if (wp == SPI_SETWORKAREA)
         {
+            LOG0(1, L"WM_SETTINGCHANGE SPI_SETWORKAREA");
             Host_ScheduleHeal(FALSE);
             return 0;
         }
+        /* Applications redraw small icons for the new system
+           size — the cache is stale. */
+        if (GetSystemMetrics(SM_CXSMICON) != s_smIconX ||
+            GetSystemMetrics(SM_CYSMICON) != s_smIconY)
+        {
+            LOG(1, L"WM_SETTINGCHANGE: smicon %dx%d -> %dx%d",
+                s_smIconX, s_smIconY,
+                GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+            s_smIconX = GetSystemMetrics(SM_CXSMICON);
+            s_smIconY = GetSystemMetrics(SM_CYSMICON);
+            App_ScheduleIconRebuild();
+        }
+        break;
+
+    case WM_THEMECHANGED:
+        /* Icons of some applications depend on the theme — reloading. */
+            LOG0(1, L"WM_THEMECHANGED");
+        App_ScheduleIconRebuild();
         break;
 
     case WM_TIMER:
+        if (wp == ICON_REBUILD_TIMER_ID)
+        {
+            KillTimer(hwnd, ICON_REBUILD_TIMER_ID);
+            LOG0(1, L"rebuild timer fired");
+            Icon_RebuildAll();
+            return 0;
+        }
         if (wp == HEAL_TIMER_ID)
         {
+            BOOL healed;
             KillTimer(hwnd, HEAL_TIMER_ID);
-            /* Своя перерегистрация меняет work area и снова приходит сюда;
-               лимит — на случай, если shell полосу так и не отдаёт. */
-            if (S.healAttempts < HEAL_MAX_ATTEMPTS && App_HealAppBars())
-                S.healAttempts++;
-            else if (S.healAttempts < HEAL_MAX_ATTEMPTS)
-                S.healAttempts = 0;
+            /* Our own re-registration changes the work area and lands here again;
+               the limit guards against the shell never giving the strip back. */
+            if (S.healAttempts < HEAL_MAX_ATTEMPTS)
+            {
+                healed = App_HealAppBars();
+                LOG(1, L"heal: %s (attempt=%d)",
+                    healed ? L"fixed" : L"clean", S.healAttempts);
+                if (healed)
+                    S.healAttempts++;
+                else
+                    S.healAttempts = 0;
+            }
             return 0;
         }
         break;
@@ -332,8 +387,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int nShow)
     WNDCLASSEXW wc;
     MSG msg;
 
-    /* EntryPoint=WinMain без CRT: на x64 загрузчик кладёт в RCX параметр
-       потока, а не hInstance — модуль берём сами. */
+    /* EntryPoint=WinMain without CRT: on x64 the loader puts the thread
+       parameter, not hInstance, in RCX — get the module handle ourselves. */
     hInst = GetModuleHandleW(NULL);
 
     (void)hPrev;
@@ -345,6 +400,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int nShow)
         return 0;
 
     Str_Init();
+    Log_Init();
     Cfg_Load();
     S.hInst = hInst;
 
@@ -362,9 +418,13 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmdLine, int nShow)
     wc.hIconSm = NULL;
     RegisterClassExW(&wc);
 
+    /* WndProc starts firing inside CreateWindowExW, so its state must be ready */
+    S.taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    s_smIconX = GetSystemMetrics(SM_CXSMICON);
+    s_smIconY = GetSystemMetrics(SM_CYSMICON);
+
     S.hwndHost = CreateWindowExW(WS_EX_TOOLWINDOW, HOST_CLASS, APP_NAME, WS_POPUP,
                                  0, 0, 0, 0, NULL, NULL, hInst, NULL);
-    S.taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     Trk_OnChanged = App_OnTrackerChanged;
     Trk_OnForeground = App_OnForeground;

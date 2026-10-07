@@ -5,5 +5,5 @@
 void Tray_Create(HINSTANCE hInst);
 void Tray_Destroy(void);
 
-/* Приводит иконку в соответствие состоянию панелей (вызывает host). */
+/* Syncs the icon with the panel state (called by the host). */
 void Tray_SyncIcon(void);
